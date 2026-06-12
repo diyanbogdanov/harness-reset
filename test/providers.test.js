@@ -143,3 +143,39 @@ test('detectProvider warns when installed Codex sees API env vars', () => {
   assert.match(result.warnings[0], /CODEX_API_KEY/);
   assert.match(result.warnings[1], /OPENAI_API_KEY/);
 });
+
+test('detectProvider runs Windows cmd shims through cmd.exe for version detection', () => {
+  const env = {
+    Path: 'C:\\Tools',
+    PATHEXT: '.CMD',
+    USERPROFILE: 'C:\\Users\\Alex',
+  };
+  const executable = path.win32.normalize('C:\\Tools\\claude.CMD');
+  const spawnCalls = [];
+  const result = detectProvider('claude', {
+    env,
+    fs: fakeFsWith([executable]),
+    platform: 'win32',
+    spawnSync(command, args, options) {
+      spawnCalls.push({ command, args, options });
+      return {
+        status: 0,
+        stdout: '2.1.104 (Claude Code)\r\n',
+      };
+    },
+  });
+
+  assert.deepEqual(spawnCalls, [
+    {
+      command: 'cmd.exe',
+      args: ['/d', '/s', '/c', `"${executable}" --version`],
+      options: {
+        encoding: 'utf8',
+        env,
+      },
+    },
+  ]);
+  assert.equal(result.executable, executable);
+  assert.equal(result.installed, true);
+  assert.equal(result.version, '2.1.104 (Claude Code)');
+});

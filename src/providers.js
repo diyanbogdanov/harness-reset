@@ -4,6 +4,26 @@ import nodeFs from 'node:fs';
 import { PROVIDERS } from './constants.js';
 import { findExecutable, providerStateDir } from './platform.js';
 
+function executableExtension(executable) {
+  const extensionMatch = /(\.[^./\\]+)$/.exec(executable);
+
+  return extensionMatch?.[1].toLowerCase() || '';
+}
+
+function versionCommandForExecutable(executable, platform) {
+  if (platform === 'win32' && ['.bat', '.cmd'].includes(executableExtension(executable))) {
+    return {
+      command: 'cmd.exe',
+      args: ['/d', '/s', '/c', `"${executable}" --version`],
+    };
+  }
+
+  return {
+    command: executable,
+    args: ['--version'],
+  };
+}
+
 function providerWarnings(provider, env) {
   const warnings = [];
 
@@ -50,7 +70,8 @@ export function detectProvider(
     };
   }
 
-  const versionResult = spawnSync(executable, ['--version'], {
+  const versionCommand = versionCommandForExecutable(executable, platform);
+  const versionResult = spawnSync(versionCommand.command, versionCommand.args, {
     encoding: 'utf8',
     env,
   });
