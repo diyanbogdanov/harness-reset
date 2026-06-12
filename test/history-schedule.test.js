@@ -112,6 +112,24 @@ test('inferWarmupTime recommends lead time before median first activity', () => 
   });
 });
 
+test('inferWarmupTime clamps warmup time to the last minute of the day', () => {
+  const samples = [
+    new Date(2026, 5, 8, 23, 50),
+    new Date(2026, 5, 9, 23, 45),
+    new Date(2026, 5, 10, 23, 40),
+    new Date(2026, 5, 11, 23, 55),
+    new Date(2026, 5, 12, 23, 50),
+  ];
+
+  assert.deepEqual(inferWarmupTime(samples, { leadMinutes: -40, minActiveDays: 5 }), {
+    kind: 'suggested',
+    activeDays: 5,
+    firstActivity: '23:50',
+    warmupTime: '23:59',
+    schedule: 'daily at 23:59',
+  });
+});
+
 test('inferWarmupTime reports insufficient history before the minimum active days', () => {
   const samples = [new Date(2026, 5, 10, 9, 30), new Date(2026, 5, 11, 10, 0)];
 

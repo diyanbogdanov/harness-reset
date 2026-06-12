@@ -24,6 +24,10 @@ function medianMinutes(minutes) {
   return Math.round((sorted[middle - 1] + sorted[middle]) / 2);
 }
 
+function clampDayMinutes(minutes) {
+  return Math.min(23 * 60 + 59, Math.max(0, minutes));
+}
+
 export function inferWarmupTime(samples, { leadMinutes, minActiveDays }) {
   const firstByDay = new Map();
 
@@ -48,7 +52,7 @@ export function inferWarmupTime(samples, { leadMinutes, minActiveDays }) {
   }
 
   const firstActivityMinutes = medianMinutes([...firstByDay.values()]);
-  const warmupMinutes = Math.max(0, firstActivityMinutes - leadMinutes);
+  const warmupMinutes = clampDayMinutes(firstActivityMinutes - leadMinutes);
   const warmupTime = formatTime(warmupMinutes);
 
   return {
