@@ -12,6 +12,7 @@ function createMemoryFs(files = {}) {
   const state = {
     files: new Map(Object.entries(files)),
     mkdirCalls: [],
+    renameCalls: [],
     writeCalls: [],
   };
 
@@ -30,6 +31,11 @@ function createMemoryFs(files = {}) {
     writeFileSync(filePath, contents, encoding) {
       state.writeCalls.push({ filePath, contents, encoding });
       state.files.set(filePath, contents);
+    },
+    renameSync(oldPath, newPath) {
+      state.renameCalls.push({ oldPath, newPath });
+      state.files.set(newPath, state.files.get(oldPath));
+      state.files.delete(oldPath);
     },
   };
 }
@@ -50,6 +56,36 @@ test('readConfig returns the default config when the file is missing', () => {
   });
 });
 
+test('readConfig keeps only supported provider metadata fields', () => {
+  const fs = createMemoryFs({
+    '/tmp/harness-reset/config.json': JSON.stringify({
+      version: 1,
+      providers: {
+        claude: {
+          enabled: true,
+          routineName: 'Harness Reset Warmup',
+          schedule: 'daily at 08:30',
+          promptHash: 'sha256:abc',
+          apiKey: 'secret',
+        },
+        unknown: { token: 'secret' },
+      },
+    }),
+  });
+
+  assert.deepEqual(readConfig('/tmp/harness-reset/config.json', { fs }), {
+    version: 1,
+    providers: {
+      claude: {
+        enabled: true,
+        routineName: 'Harness Reset Warmup',
+        schedule: 'daily at 08:30',
+        promptHash: 'sha256:abc',
+      },
+    },
+  });
+});
+
 test('writeConfig creates the parent directory and writes pretty JSON with a trailing newline', () => {
   const fs = createMemoryFs();
   const config = {
@@ -64,11 +100,27 @@ test('writeConfig creates the parent directory and writes pretty JSON with a tra
   assert.deepEqual(fs.state.mkdirCalls, [
     { dirPath: '/tmp/harness-reset', options: { recursive: true } },
   ]);
-  assert.deepEqual(fs.state.writeCalls, [
+  assert.equal(fs.state.writeCalls.length, 1);
+  assert.equal(fs.state.writeCalls[0].contents, `${JSON.stringify(config, null, 2)}\n`);
+  assert.equal(fs.state.writeCalls[0].encoding, 'utf8');
+});
+
+test('writeConfig writes to a same-directory temp file before renaming into place', () => {
+  const fs = createMemoryFs();
+  const config = { version: 1, providers: {} };
+
+  writeConfig('/tmp/harness-reset/config.json', config, { fs });
+
+  assert.equal(fs.state.writeCalls.length, 1);
+  assert.equal(fs.state.renameCalls.length, 1);
+
+  const tempPath = fs.state.writeCalls[0].filePath;
+  assert.equal(tempPath.startsWith('/tmp/harness-reset/.config.json.'), true);
+  assert.equal(tempPath.endsWith('.tmp'), true);
+  assert.deepEqual(fs.state.renameCalls, [
     {
-      filePath: '/tmp/harness-reset/config.json',
-      contents: `${JSON.stringify(config, null, 2)}\n`,
-      encoding: 'utf8',
+      oldPath: tempPath,
+      newPath: '/tmp/harness-reset/config.json',
     },
   ]);
 });
