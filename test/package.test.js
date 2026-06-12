@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
-import { access, readFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { access, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 test('package publishes only src and points bin at an executable CLI stub', async () => {
   const packageJson = JSON.parse(await readFile('package.json', 'utf8'));
@@ -16,4 +21,31 @@ test('package publishes only src and points bin at an executable CLI stub', asyn
 
   const binContents = await readFile(binPath, 'utf8');
   assert.equal(binContents.split('\n')[0], '#!/usr/bin/env node');
+});
+
+test('installed package bin prints usage from the CLI stub', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'harness-reset-package-'));
+  const installDir = path.join(tempDir, 'install');
+
+  try {
+    await mkdir(installDir);
+
+    const { stdout: packOutput } = await execFileAsync(
+      'npm',
+      ['pack', '--json', '--pack-destination', tempDir],
+      { cwd: process.cwd() },
+    );
+    const [{ filename }] = JSON.parse(packOutput);
+    const tarballPath = path.join(tempDir, filename);
+
+    await execFileAsync('npm', ['install', '--prefix', installDir, tarballPath]);
+
+    const binName = process.platform === 'win32' ? 'harness-reset.cmd' : 'harness-reset';
+    const binPath = path.join(installDir, 'node_modules', '.bin', binName);
+    const { stdout } = await execFileAsync(binPath);
+
+    assert.match(stdout, /^Usage: harness-reset/);
+  } finally {
+    await rm(tempDir, { force: true, recursive: true });
+  }
 });
