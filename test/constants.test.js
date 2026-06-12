@@ -13,9 +13,13 @@ test('exports supported providers in deterministic order', () => {
 });
 
 test('exports the safe default prompt for low-cost warmup runs', () => {
-  assert.match(DEFAULT_PROMPT, /Reply with exactly: ok/);
-  assert.match(DEFAULT_PROMPT, /Do not inspect files/);
-  assert.match(DEFAULT_PROMPT, /do not run commands/);
+  assert.equal(
+    DEFAULT_PROMPT,
+    [
+      'Reply with exactly: ok',
+      'Do not inspect files, do not run commands, do not modify anything, and do not use connectors or tools.',
+    ].join('\n'),
+  );
 });
 
 test('exports the default lead time in minutes', () => {
