@@ -44,6 +44,46 @@ test('findExecutable locates a Windows executable through PATHEXT', () => {
   assert.equal(result, expectedPath);
 });
 
+test('findExecutable reads Windows Path case-insensitively', () => {
+  const expectedPath = path.win32.normalize('C:\\Tools\\codex.CMD');
+  const fakeFs = {
+    existsSync(candidate) {
+      return candidate === expectedPath;
+    },
+  };
+
+  const result = findExecutable('codex', {
+    env: {
+      Path: 'C:\\Tools',
+      PATHEXT: '.CMD',
+    },
+    fs: fakeFs,
+    platform: 'win32',
+  });
+
+  assert.equal(result, expectedPath);
+});
+
+test('findExecutable treats empty Windows PATHEXT as missing', () => {
+  const expectedPath = path.win32.normalize('C:\\Tools\\codex.CMD');
+  const fakeFs = {
+    existsSync(candidate) {
+      return candidate === expectedPath;
+    },
+  };
+
+  const result = findExecutable('codex', {
+    env: {
+      PATH: 'C:\\Tools',
+      PATHEXT: '',
+    },
+    fs: fakeFs,
+    platform: 'win32',
+  });
+
+  assert.equal(result, expectedPath);
+});
+
 test('providerStateDir returns provider-specific state directories', () => {
   assert.equal(
     providerStateDir('claude', {
@@ -62,6 +102,16 @@ test('providerStateDir returns provider-specific state directories', () => {
   );
 });
 
+test('providerStateDir treats empty HOME as missing', () => {
+  const result = providerStateDir('claude', {
+    env: { HOME: '' },
+    platform: 'linux',
+  });
+
+  assert.equal(path.posix.isAbsolute(result), true);
+  assert.equal(result.endsWith('/.claude'), true);
+});
+
 test('configFilePath returns the platform-specific config path', () => {
   assert.equal(
     configFilePath({
@@ -77,5 +127,18 @@ test('configFilePath returns the platform-specific config path', () => {
       platform: 'win32',
     }),
     path.win32.normalize('C:\\Users\\Alex\\AppData\\Roaming\\harness-reset\\config.json'),
+  );
+});
+
+test('configFilePath treats empty XDG_CONFIG_HOME as missing', () => {
+  assert.equal(
+    configFilePath({
+      env: {
+        HOME: '/Users/alex',
+        XDG_CONFIG_HOME: '',
+      },
+      platform: 'linux',
+    }),
+    path.posix.normalize('/Users/alex/.config/harness-reset/config.json'),
   );
 });

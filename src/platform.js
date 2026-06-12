@@ -8,12 +8,30 @@ function pathForPlatform(platform) {
   return platform === 'win32' ? path.win32 : path.posix;
 }
 
-export function homeDirectory({ env = process.env, platform = process.platform } = {}) {
-  if (platform === 'win32') {
-    return env.USERPROFILE ?? os.homedir();
+function envValue(env, key) {
+  return env[key] || undefined;
+}
+
+function pathEnvValue(env, platform) {
+  const pathValue = envValue(env, 'PATH');
+
+  if (pathValue !== undefined || platform !== 'win32') {
+    return pathValue;
   }
 
-  return env.HOME ?? os.homedir();
+  const pathEntry = Object.entries(env).find(([key, value]) => {
+    return key.toLowerCase() === 'path' && value;
+  });
+
+  return pathEntry?.[1];
+}
+
+export function homeDirectory({ env = process.env, platform = process.platform } = {}) {
+  if (platform === 'win32') {
+    return envValue(env, 'USERPROFILE') || os.homedir();
+  }
+
+  return envValue(env, 'HOME') || os.homedir();
 }
 
 export function findExecutable(
@@ -21,9 +39,11 @@ export function findExecutable(
   { env = process.env, platform = process.platform, fs = nodeFs } = {},
 ) {
   const platformPath = pathForPlatform(platform);
-  const pathEntries = (env.PATH ?? '').split(platformPath.delimiter);
+  const pathEntries = (pathEnvValue(env, platform) || '')
+    .split(platformPath.delimiter)
+    .filter(Boolean);
   const extensions =
-    platform === 'win32' ? (env.PATHEXT ?? '.EXE;.CMD;.BAT;.COM').split(';') : [''];
+    platform === 'win32' ? (envValue(env, 'PATHEXT') || '.EXE;.CMD;.BAT;.COM').split(';') : [''];
 
   for (const pathEntry of pathEntries) {
     for (const extension of extensions) {
@@ -57,8 +77,10 @@ export function configFilePath({ env = process.env, platform = process.platform 
   const platformPath = pathForPlatform(platform);
   const baseDir =
     platform === 'win32'
-      ? (env.APPDATA ?? platformPath.join(homeDirectory({ env, platform }), 'AppData', 'Roaming'))
-      : (env.XDG_CONFIG_HOME ?? platformPath.join(homeDirectory({ env, platform }), '.config'));
+      ? (envValue(env, 'APPDATA') ||
+        platformPath.join(homeDirectory({ env, platform }), 'AppData', 'Roaming'))
+      : (envValue(env, 'XDG_CONFIG_HOME') ||
+        platformPath.join(homeDirectory({ env, platform }), '.config'));
 
   return platformPath.normalize(platformPath.join(baseDir, 'harness-reset', CONFIG_FILE_NAME));
 }
