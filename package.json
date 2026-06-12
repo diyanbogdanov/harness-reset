@@ -1,0 +1,17 @@
+{
+  "name": "harness-reset",
+  "version": "0.1.0",
+  "description": "Create native Claude Code Routines and Codex Automations for low-cost harness warmup runs.",
+  "type": "module",
+  "bin": {
+    "harness-reset": "./src/cli.js"
+  },
+  "scripts": {
+    "test": "node --test",
+    "lint": "node --check src/*.js && node --check test/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}
