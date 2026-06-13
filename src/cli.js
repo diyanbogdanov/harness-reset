@@ -25,8 +25,9 @@ import { configFilePath } from './platform.js';
 import { detectProvider, detectProviders } from './providers.js';
 import { inferWarmupTime } from './schedule.js';
 
-const USAGE = 'Usage: harness-reset <detect|plan|setup|status> [--provider claude|codex] [--time HH:MM] [--dry-run] [--yes]';
+const USAGE = 'Usage: harness-reset <detect|plan|setup|update|remove|status> [--provider claude|codex] [--time HH:MM] [--lead-minutes N] [--dry-run] [--yes]';
 const MIN_ACTIVE_DAYS = 5;
+const WARMUP_NAME = 'Harness Reset Warmup';
 
 function defaultIo() {
   return {
@@ -251,6 +252,53 @@ function writeProviderConfig(provider, { env, platform, fs, schedule, prompt }) 
   writeConfig(filePath, nextConfig, { fs });
 }
 
+function removeProviderConfig(provider, { env, platform, fs }) {
+  const filePath = configFilePath({ env, platform });
+  const currentConfig = readConfig(filePath, { fs });
+  const nextProviders = { ...currentConfig.providers };
+  const existed = Object.hasOwn(nextProviders, provider);
+
+  delete nextProviders[provider];
+  writeConfig(
+    filePath,
+    {
+      ...currentConfig,
+      providers: nextProviders,
+    },
+    { fs },
+  );
+
+  return existed;
+}
+
+function printNativeRemovalInstructions(io, provider) {
+  if (provider === 'claude') {
+    writeStdout(
+      io,
+      'Native Claude routine was not deleted. Manage it with /schedule list and /schedule update, or from the Claude Code routines page.\n',
+    );
+    return;
+  }
+
+  if (provider === 'codex') {
+    writeStdout(
+      io,
+      'Native Codex Automation was not deleted. Remove or pause the "Harness Reset Warmup" automation in Codex Automations.\n',
+    );
+  }
+}
+
+function printClaudeScheduleFailure(io, status) {
+  writeStderr(
+    io,
+    [
+      `Claude schedule command failed with exit code ${status}.`,
+      'Likely causes: API-key/cloud-provider auth instead of claude.ai subscription auth; disabled feature traffic; older Claude Code CLI; org policy disabling routines.',
+    ].join('\n'),
+  );
+  writeStderr(io, '\n');
+}
+
 async function setupClaude({
   io,
   env,
@@ -293,7 +341,7 @@ async function setupClaude({
   });
 
   if (result.status !== 0) {
-    writeStderr(io, `Claude schedule command failed with exit code ${result.status}.\n`);
+    printClaudeScheduleFailure(io, result.status);
     return 1;
   }
 
@@ -301,21 +349,52 @@ async function setupClaude({
   return 0;
 }
 
-async function setupCodex({ io, env, platform, fs, schedule, prompt, dryRun, yes }) {
+async function setupCodex({
+  io,
+  env,
+  platform,
+  fs,
+  schedule,
+  prompt,
+  dryRun,
+  yes,
+  codexAutomationCreate,
+}) {
   const action = buildCodexAutomationAction({ schedule, prompt });
 
-  writeStdout(io, `${action.fallback}\n`);
-
   if (dryRun) {
+    writeStdout(io, `${action.fallback}\n`);
     return 0;
   }
+
+  if (typeof codexAutomationCreate === 'function') {
+    if (!yes) {
+      writeStdout(io, 'Type "create" to continue: ');
+      const confirmation = await readConfirmation(io);
+
+      if (confirmation !== 'create') {
+        writeStdout(io, 'Aborted\n');
+        return 1;
+      }
+    }
+
+    await codexAutomationCreate({
+      name: WARMUP_NAME,
+      schedule,
+      prompt,
+    });
+    writeProviderConfig('codex', { env, platform, fs, schedule, prompt });
+    return 0;
+  }
+
+  writeStdout(io, `${action.fallback}\n`);
 
   if (yes) {
     writeStdout(
       io,
       'Codex automation was not created by this CLI. Create it in Codex, then type "create" to record local metadata.\n',
     );
-    return 0;
+    return 1;
   }
 
   writeStdout(
@@ -334,7 +413,7 @@ async function setupCodex({ io, env, platform, fs, schedule, prompt, dryRun, yes
 }
 
 async function runSetup(parsed, deps) {
-  const { env, platform, fs: depFs, spawnSync, io } = deps;
+  const { env, platform, fs: depFs, spawnSync, io, codexAutomationCreate } = deps;
   let exitCode = 0;
 
   for (const provider of selectedProviders(parsed.provider)) {
@@ -393,6 +472,7 @@ async function runSetup(parsed, deps) {
             prompt,
             dryRun: parsed.dryRun,
             yes: parsed.yes,
+            codexAutomationCreate,
           });
 
     if (providerExitCode !== 0) {
@@ -401,6 +481,24 @@ async function runSetup(parsed, deps) {
   }
 
   return exitCode;
+}
+
+function runRemove(parsed, deps) {
+  const { env, platform, fs: depFs, io } = deps;
+
+  for (const provider of selectedProviders(parsed.provider)) {
+    const removed = removeProviderConfig(provider, { env, platform, fs: depFs });
+
+    if (removed) {
+      writeStdout(io, `Removed local metadata for ${provider}.\n`);
+    } else {
+      writeStdout(io, `No local metadata found for ${provider}.\n`);
+    }
+
+    printNativeRemovalInstructions(io, provider);
+  }
+
+  return 0;
 }
 
 function runPlan(parsed, deps) {
@@ -441,6 +539,7 @@ export async function runCli(argv = process.argv.slice(2), deps = {}) {
   const platform = deps.platform || process.platform;
   const depFs = deps.fs || fs;
   const spawnSync = deps.spawnSync || nodeSpawnSync;
+  const codexAutomationCreate = deps.codexAutomationCreate;
   const parsed = parseArgs(argv);
   const normalizedDeps = {
     env,
@@ -448,6 +547,7 @@ export async function runCli(argv = process.argv.slice(2), deps = {}) {
     fs: depFs,
     spawnSync,
     io,
+    codexAutomationCreate,
   };
 
   if (parsed.command === 'help' || parsed.command === '--help' || parsed.command === '-h') {
@@ -497,13 +597,22 @@ export async function runCli(argv = process.argv.slice(2), deps = {}) {
     return runPlan(parsed, normalizedDeps);
   }
 
-  if (parsed.command === 'setup') {
+  if (parsed.command === 'setup' || parsed.command === 'update') {
     return runSetup(parsed, normalizedDeps);
+  }
+
+  if (parsed.command === 'remove') {
+    return runRemove(parsed, normalizedDeps);
   }
 
   if (parsed.command === 'status') {
     const filePath = configFilePath({ env, platform });
-    writeStdout(io, `${JSON.stringify(readConfig(filePath, { fs: depFs }), null, 2)}\n`);
+
+    for (const result of detectProviders({ env, platform, fs: depFs, spawnSync })) {
+      printDetection(io, result);
+    }
+
+    writeStdout(io, `Metadata:\n${JSON.stringify(readConfig(filePath, { fs: depFs }), null, 2)}\n`);
     return 0;
   }
 

@@ -8,7 +8,9 @@ NPX-friendly setup CLI for native Claude Code Routines and Codex Automations.
 - Looks at local state file modification times without reading prompt or response contents.
 - Suggests a daily warmup time, defaulting to 30 minutes before usual first activity.
 - Creates a Claude Code Routine through the native `/schedule` flow.
+- Creates a Codex Automation when the host environment exposes a native automation creator.
 - Provides native Codex Automation instructions when direct creation is unavailable from a plain terminal.
+- Records local metadata for created or manually confirmed warmup schedules.
 
 ## What it does not do
 
@@ -22,8 +24,11 @@ NPX-friendly setup CLI for native Claude Code Routines and Codex Automations.
 ```bash
 npx harness-reset detect
 npx harness-reset plan
+npx harness-reset status
 npx harness-reset setup --provider claude --dry-run
 npx harness-reset setup --provider codex --time 09:00 --dry-run
+npx harness-reset update --provider claude --time 09:00 --dry-run
+npx harness-reset remove --provider claude
 ```
 
 To create a Claude Code Routine:
@@ -34,7 +39,13 @@ npx harness-reset setup --provider claude --time 09:00
 
 Type `create` when prompted to continue.
 
-For Codex in plain-terminal mode, the CLI prints native Codex Automation instructions instead of directly creating the automation.
+Use `update` to re-run setup for an existing provider. If no local metadata exists yet, `update` still behaves like setup.
+
+Use `remove` to delete local harness-reset metadata. It does not delete native Claude Code Routines or Codex Automations; it prints provider-specific instructions for removing or pausing those native schedules.
+
+`status` prints provider availability first, then local metadata JSON.
+
+For Codex in plain-terminal mode, the CLI prints native Codex Automation instructions instead of directly creating the automation. `--yes` does not mark Codex configured in this fallback mode because the CLI cannot prove the automation was created; type `create` after manually creating it to record local metadata.
 
 Claude Code Routines consume normal Claude plan usage. Codex Automations consume normal Codex usage and can affect weekly usage limits.
 
