@@ -43,6 +43,7 @@ function createIo(input = '') {
   return {
     stdout: '',
     stderr: '',
+    isTty: false,
     stdin: {
       read() {
         return input;
@@ -54,6 +55,13 @@ function createIo(input = '') {
     writeStderr(text) {
       this.stderr += text;
     },
+  };
+}
+
+function createInteractiveIo(input = '') {
+  return {
+    ...createIo(input),
+    isTty: true,
   };
 }
 
@@ -98,6 +106,53 @@ test('default command shows suggestions when no agent-warmup setup is recorded',
     spawn.calls.map((call) => [call.command, call.args]),
     [['/bin/claude', ['--version']]],
   );
+});
+
+test('default command renders a polished interactive dashboard when stdout is a TTY', async () => {
+  const fs = createMemoryFs({
+    '/bin/claude': '',
+    '/home/alex/.claude': '',
+  });
+  const io = createInteractiveIo();
+  const spawn = createSpawn({ '/bin/claude': '2.1.104 (Claude Code)' });
+
+  const exitCode = await runCli([], {
+    env: { HOME: '/home/alex', PATH: '/bin' },
+    fs,
+    io,
+    platform: 'linux',
+    spawnSync: spawn.spawnSync,
+  });
+
+  assert.equal(exitCode, 0);
+  assert.match(io.stdout, /\u001b\[/);
+  assert.match(io.stdout, /Agent Warmup/);
+  assert.match(io.stdout, /Scanning local harness history/);
+  assert.match(io.stdout, /Claude Code/);
+  assert.match(io.stdout, /setup --provider claude --time HH:MM/);
+});
+
+test('plain flag disables terminal styling and animation output', async () => {
+  const fs = createMemoryFs({
+    '/bin/claude': '',
+    '/home/alex/.claude': '',
+  });
+  const io = createInteractiveIo();
+  const spawn = createSpawn({ '/bin/claude': '2.1.104 (Claude Code)' });
+
+  const exitCode = await runCli(['--plain'], {
+    env: { HOME: '/home/alex', PATH: '/bin' },
+    fs,
+    io,
+    platform: 'linux',
+    spawnSync: spawn.spawnSync,
+  });
+
+  assert.equal(exitCode, 0);
+  assert.doesNotMatch(io.stdout, /\u001b\[/);
+  assert.doesNotMatch(io.stdout, /Scanning local harness history/);
+  assert.match(io.stdout, /Agent Warmup/);
+  assert.match(io.stdout, /claude: insufficient usage-limit hit history/);
 });
 
 test('default command shows routines recorded by agent-warmup', async () => {

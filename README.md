@@ -30,6 +30,7 @@ npx agent-warmup remove --provider claude
 ```
 
 Run `npx agent-warmup` to see routines/automations recorded by this CLI. If none are recorded, it shows provider detection and setup suggestions.
+Interactive terminals get color and a small scan spinner. Use `--plain` for deterministic output in scripts, snapshots, or terminals where styling is unwanted.
 
 To create a Claude Code Routine:
 

@@ -25,13 +25,15 @@ import { collectLimitHitSamples } from './history.js';
 import { configFilePath } from './platform.js';
 import { detectProvider, detectProviders } from './providers.js';
 import { inferWarmupTime } from './schedule.js';
+import { createUi } from './ui.js';
 
-const USAGE = 'Usage: agent-warmup [setup|remove] [--provider claude|codex] [--time HH:MM] [--window-minutes N] [--reset-padding-minutes N] [--dry-run] [--yes]';
+const USAGE = 'Usage: agent-warmup [setup|remove] [--provider claude|codex] [--time HH:MM] [--window-minutes N] [--reset-padding-minutes N] [--dry-run] [--yes] [--plain]';
 const MIN_LIMIT_HIT_DAYS = 5;
 const WARMUP_NAME = 'Agent Warmup';
 
 function defaultIo() {
   return {
+    isTty: Boolean(process.stdout.isTTY),
     stdin: {
       async read() {
         const readline = createInterface({
@@ -75,16 +77,27 @@ function writeStderr(io, text) {
 
 function parseArgs(argv) {
   const parsed = {
-    command: argv[0] || 'dashboard',
+    command: 'dashboard',
     provider: null,
     dryRun: false,
     yes: false,
+    plain: false,
     time: null,
     resetPaddingMinutes: DEFAULT_RESET_PADDING_MINUTES,
     windowMinutes: DEFAULT_LIMIT_WINDOW_MINUTES,
   };
 
-  for (let index = 1; index < argv.length; index += 1) {
+  let startIndex = 0;
+
+  if (argv[0] === '--help' || argv[0] === '-h') {
+    parsed.command = argv[0];
+    startIndex = 1;
+  } else if (argv[0] && !argv[0].startsWith('--')) {
+    parsed.command = argv[0];
+    startIndex = 1;
+  }
+
+  for (let index = startIndex; index < argv.length; index += 1) {
     const arg = argv[index];
 
     if (arg === '--provider') {
@@ -100,6 +113,11 @@ function parseArgs(argv) {
 
     if (arg === '--yes') {
       parsed.yes = true;
+      continue;
+    }
+
+    if (arg === '--plain') {
+      parsed.plain = true;
       continue;
     }
 
@@ -150,54 +168,81 @@ function printUsage(io) {
   writeStdout(io, `${USAGE}\n`);
 }
 
-function printDetection(io, result) {
+function providerLabel(provider) {
+  return provider === 'claude' ? 'Claude Code' : 'Codex';
+}
+
+function printDetection(io, result, ui = createUi({ io, plain: true })) {
   const installText = result.installed
-    ? `installed${result.version ? ` (${result.version})` : ''}`
-    : 'missing';
+    ? ui.green(`installed${result.version ? ` (${result.version})` : ''}`)
+    : ui.yellow('missing');
   const stateText = result.stateDirExists ? 'local state found' : 'local state missing';
 
-  writeStdout(io, `${result.provider}: ${installText}; ${stateText}\n`);
+  const provider = ui.interactive ? providerLabel(result.provider) : result.provider;
+
+  writeStdout(io, `${provider}: ${installText}; ${ui.dim(stateText)}\n`);
 
   for (const warning of result.warnings) {
     writeStdout(io, `  warning: ${warning}\n`);
   }
 }
 
-function printConfiguredProviders(io, config) {
+function printConfiguredProviders(io, config, ui = createUi({ io, plain: true })) {
   const configured = PROVIDERS.filter((provider) => config.providers[provider]);
 
   if (configured.length === 0) {
-    writeStdout(io, 'No agent-warmup routines are recorded yet.\n');
+    writeStdout(io, `${ui.dim('No agent-warmup routines are recorded yet.')}\n`);
     return 0;
   }
 
-  writeStdout(io, 'Configured routines/automations:\n');
+  writeStdout(io, `${ui.bold('Configured routines/automations')}${ui.interactive ? '' : ':'}\n`);
 
   for (const provider of configured) {
     const metadata = config.providers[provider];
     const name = provider === 'claude' ? metadata.routineName : metadata.automationName;
 
+    if (!ui.interactive) {
+      writeStdout(
+        io,
+        `  ${provider}: ${name || WARMUP_NAME}, ${metadata.schedule} (recorded by agent-warmup; native status not verified)\n`,
+      );
+      continue;
+    }
+
     writeStdout(
       io,
-      `  ${provider}: ${name || WARMUP_NAME}, ${metadata.schedule} (recorded by agent-warmup; native status not verified)\n`,
+      `  ${ui.symbol('ready')} ${providerLabel(provider)} ${ui.cyan(metadata.schedule)} ${ui.dim(`${name || WARMUP_NAME}; native status not verified`)}\n`,
     );
   }
 
   return configured.length;
 }
 
-function printSetupSuggestions(io, results, config, { fs, resetPaddingMinutes, windowMinutes }) {
+function printSetupSuggestions(
+  io,
+  results,
+  config,
+  { fs, resetPaddingMinutes, ui, windowMinutes },
+) {
   const providersWithoutConfig = results.filter((result) => !config.providers[result.provider]);
 
   if (providersWithoutConfig.length === 0) {
     return;
   }
 
-  writeStdout(io, 'Suggestions:\n');
+  writeStdout(io, `${ui.bold('Suggestions')}${ui.interactive ? '' : ':'}\n`);
 
   for (const result of providersWithoutConfig) {
     if (!result.installed) {
-      writeStdout(io, `  ${result.provider}: missing. Install ${result.provider} before setup.\n`);
+      if (!ui.interactive) {
+        writeStdout(io, `  ${result.provider}: missing. Install ${result.provider} before setup.\n`);
+        continue;
+      }
+
+      writeStdout(
+        io,
+        `  ${ui.symbol('missing')} ${providerLabel(result.provider)} ${ui.yellow('missing')} ${ui.dim(`install ${result.provider} before setup`)}\n`,
+      );
       continue;
     }
 
@@ -208,16 +253,32 @@ function printSetupSuggestions(io, results, config, { fs, resetPaddingMinutes, w
     });
 
     if (scheduleResult.kind === 'insufficient-limit-history') {
+      if (!ui.interactive) {
+        writeStdout(
+          io,
+          `  ${result.provider}: insufficient usage-limit hit history (${scheduleResult.limitHitDays}/${scheduleResult.requiredDays} days). Run: agent-warmup setup --provider ${result.provider} --time HH:MM\n`,
+        );
+        continue;
+      }
+
       writeStdout(
         io,
-        `  ${result.provider}: insufficient usage-limit hit history (${scheduleResult.limitHitDays}/${scheduleResult.requiredDays} days). Run: agent-warmup setup --provider ${result.provider} --time HH:MM\n`,
+        `  ${ui.symbol('missing')} ${providerLabel(result.provider)} insufficient usage-limit hit history (${scheduleResult.limitHitDays}/${scheduleResult.requiredDays} days). ${ui.cyan(`Run: agent-warmup setup --provider ${result.provider} --time HH:MM`)}\n`,
+      );
+      continue;
+    }
+
+    if (!ui.interactive) {
+      writeStdout(
+        io,
+        `  ${result.provider}: ${scheduleResult.schedule} based on ${scheduleResult.limitHitDays} limit-hit days; usual limit hit ${scheduleResult.limitHit}, target reset ${scheduleResult.targetReset}. Run: agent-warmup setup --provider ${result.provider}\n`,
       );
       continue;
     }
 
     writeStdout(
       io,
-      `  ${result.provider}: ${scheduleResult.schedule} based on ${scheduleResult.limitHitDays} limit-hit days; usual limit hit ${scheduleResult.limitHit}, target reset ${scheduleResult.targetReset}. Run: agent-warmup setup --provider ${result.provider}\n`,
+      `  ${ui.symbol('warm')} ${providerLabel(result.provider)} ${ui.cyan(scheduleResult.schedule)} ${ui.dim(`${scheduleResult.limitHit} -> ${scheduleResult.targetReset} -> ${scheduleResult.warmupTime}; ${scheduleResult.limitHitDays} limit-hit days`)} ${ui.cyan(`Run: agent-warmup setup --provider ${result.provider}`)}\n`,
     );
   }
 }
@@ -582,15 +643,17 @@ function runDashboard(parsed, deps) {
   const { env, platform, fs: depFs, spawnSync, io } = deps;
   const filePath = configFilePath({ env, platform });
   const config = readConfig(filePath, { fs: depFs });
+  const ui = createUi({ env, io, plain: parsed.plain });
 
-  writeStdout(io, 'Agent Warmup\n');
+  writeStdout(io, `${ui.bold(ui.cyan('Agent Warmup'))}\n`);
 
-  const configuredCount = printConfiguredProviders(io, config);
+  const configuredCount = printConfiguredProviders(io, config, ui);
 
   if (configuredCount > 0) {
     return 0;
   }
 
+  const spinner = ui.startSpinner('Scanning local harness history...');
   const detectionResults =
     parsed.provider === null
       ? detectProviders({ env, platform, fs: depFs, spawnSync })
@@ -602,17 +665,19 @@ function runDashboard(parsed, deps) {
             spawnSync,
           }),
         ];
+  spinner.stop();
 
-  writeStdout(io, 'Detected providers:\n');
+  writeStdout(io, `${ui.bold('Detected providers')}${ui.interactive ? '' : ':'}\n`);
 
   for (const result of detectionResults) {
     writeStdout(io, '  ');
-    printDetection(io, result);
+    printDetection(io, result, ui);
   }
 
   printSetupSuggestions(io, detectionResults, config, {
     fs: depFs,
     resetPaddingMinutes: parsed.resetPaddingMinutes,
+    ui,
     windowMinutes: parsed.windowMinutes,
   });
 
