@@ -1,13 +1,13 @@
 {
-  "name": "harness-reset",
+  "name": "agent-warmup",
   "version": "0.1.0",
-  "description": "Create native Claude Code Routines and Codex Automations for low-cost harness warmup runs.",
+  "description": "Create native Claude Code Routines and Codex Automations for coding-agent warmup runs.",
   "type": "module",
   "files": [
     "src"
   ],
   "bin": {
-    "harness-reset": "./src/cli.js"
+    "agent-warmup": "./src/cli.js"
   },
   "scripts": {
     "test": "node --test",

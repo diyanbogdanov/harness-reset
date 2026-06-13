@@ -13,7 +13,7 @@ test('package publishes only src and points bin at an executable CLI stub', asyn
 
   assert.deepEqual(packageJson.files, ['src']);
 
-  const binTarget = packageJson.bin?.['harness-reset'];
+  const binTarget = packageJson.bin?.['agent-warmup'];
   assert.equal(typeof binTarget, 'string');
 
   const binPath = path.join(process.cwd(), binTarget);
@@ -24,7 +24,7 @@ test('package publishes only src and points bin at an executable CLI stub', asyn
 });
 
 test('installed package bin prints usage from the CLI stub', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'harness-reset-package-'));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'agent-warmup-package-'));
   const installDir = path.join(tempDir, 'install');
 
   try {
@@ -40,11 +40,11 @@ test('installed package bin prints usage from the CLI stub', async () => {
 
     await execFileAsync('npm', ['install', '--prefix', installDir, tarballPath]);
 
-    const binName = process.platform === 'win32' ? 'harness-reset.cmd' : 'harness-reset';
+    const binName = process.platform === 'win32' ? 'agent-warmup.cmd' : 'agent-warmup';
     const binPath = path.join(installDir, 'node_modules', '.bin', binName);
     const { stdout } = await execFileAsync(binPath);
 
-    assert.match(stdout, /^Usage: harness-reset/);
+    assert.match(stdout, /^Usage: agent-warmup/);
   } finally {
     await rm(tempDir, { force: true, recursive: true });
   }

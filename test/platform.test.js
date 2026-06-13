@@ -118,7 +118,7 @@ test('configFilePath returns the platform-specific config path', () => {
       env: { XDG_CONFIG_HOME: '/tmp/config' },
       platform: 'linux',
     }),
-    path.posix.normalize('/tmp/config/harness-reset/config.json'),
+    path.posix.normalize('/tmp/config/agent-warmup/config.json'),
   );
 
   assert.equal(
@@ -126,7 +126,7 @@ test('configFilePath returns the platform-specific config path', () => {
       env: { APPDATA: 'C:\\Users\\Alex\\AppData\\Roaming' },
       platform: 'win32',
     }),
-    path.win32.normalize('C:\\Users\\Alex\\AppData\\Roaming\\harness-reset\\config.json'),
+    path.win32.normalize('C:\\Users\\Alex\\AppData\\Roaming\\agent-warmup\\config.json'),
   );
 });
 
@@ -139,6 +139,6 @@ test('configFilePath treats empty XDG_CONFIG_HOME as missing', () => {
       },
       platform: 'linux',
     }),
-    path.posix.normalize('/Users/alex/.config/harness-reset/config.json'),
+    path.posix.normalize('/Users/alex/.config/agent-warmup/config.json'),
   );
 });

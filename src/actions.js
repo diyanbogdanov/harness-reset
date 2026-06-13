@@ -12,7 +12,7 @@ export function buildClaudeScheduleAction({ schedule, prompt }) {
 
 export function buildCodexAutomationAction({ schedule, prompt }) {
   const instruction = [
-    'Create a standalone Codex Automation named "Harness Reset Warmup".',
+    'Create a standalone Codex Automation named "Agent Warmup".',
     `Run it ${schedule}.`,
     'Use this prompt:',
     prompt,

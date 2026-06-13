@@ -57,7 +57,7 @@ test('collectActivitySamples returns an empty list when the root directory is mi
 });
 
 test('collectActivitySamples collects bounded file mtimes without reading file contents', () => {
-  const rootDir = '/tmp/harness-reset';
+  const rootDir = '/tmp/agent-warmup';
   const sessionsDir = path.join(rootDir, 'state', 'sessions');
   const now = new Date(2026, 5, 12, 12, 0);
   const fs = createMemoryFs([

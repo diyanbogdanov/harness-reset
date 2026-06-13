@@ -1,4 +1,4 @@
-# harness-reset
+# agent-warmup
 
 NPX-friendly setup CLI for native Claude Code Routines and Codex Automations.
 
@@ -22,26 +22,26 @@ NPX-friendly setup CLI for native Claude Code Routines and Codex Automations.
 ## Usage
 
 ```bash
-npx harness-reset detect
-npx harness-reset plan
-npx harness-reset status
-npx harness-reset setup --provider claude --dry-run
-npx harness-reset setup --provider codex --time 09:00 --dry-run
-npx harness-reset update --provider claude --time 09:00 --dry-run
-npx harness-reset remove --provider claude
+npx agent-warmup detect
+npx agent-warmup plan
+npx agent-warmup status
+npx agent-warmup setup --provider claude --dry-run
+npx agent-warmup setup --provider codex --time 09:00 --dry-run
+npx agent-warmup update --provider claude --time 09:00 --dry-run
+npx agent-warmup remove --provider claude
 ```
 
 To create a Claude Code Routine:
 
 ```bash
-npx harness-reset setup --provider claude --time 09:00
+npx agent-warmup setup --provider claude --time 09:00
 ```
 
 Type `create` when prompted to continue.
 
 Use `update` to re-run setup for an existing provider. If no local metadata exists yet, `update` still behaves like setup.
 
-Use `remove` to delete local harness-reset metadata. It does not delete native Claude Code Routines or Codex Automations; it prints provider-specific instructions for removing or pausing those native schedules.
+Use `remove` to delete local agent-warmup metadata. It does not delete native Claude Code Routines or Codex Automations; it prints provider-specific instructions for removing or pausing those native schedules.
 
 `status` prints provider availability first, then local metadata JSON.
 
@@ -51,5 +51,5 @@ Claude Code Routines consume normal Claude plan usage. Codex Automations consume
 
 ## Metadata paths
 
-- macOS/Linux: `$XDG_CONFIG_HOME/harness-reset/config.json` when `XDG_CONFIG_HOME` is set, otherwise `~/.config/harness-reset/config.json`
-- Windows: `%APPDATA%\harness-reset\config.json`
+- macOS/Linux: `$XDG_CONFIG_HOME/agent-warmup/config.json` when `XDG_CONFIG_HOME` is set, otherwise `~/.config/agent-warmup/config.json`
+- Windows: `%APPDATA%\agent-warmup\config.json`

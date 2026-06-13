@@ -44,7 +44,7 @@ test('buildCodexAutomationAction creates a Codex automation instruction and fall
   assert.equal(action.kind, 'codex-automation');
   assert.match(
     action.instruction,
-    /Create a standalone Codex Automation named "Harness Reset Warmup"/,
+    /Create a standalone Codex Automation named "Agent Warmup"/,
   );
   assert.match(action.instruction, /daily at 09:00/);
   assert.match(action.fallback, /Open a Codex thread/);

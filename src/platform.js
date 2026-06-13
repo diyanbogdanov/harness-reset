@@ -82,5 +82,5 @@ export function configFilePath({ env = process.env, platform = process.platform 
       : (envValue(env, 'XDG_CONFIG_HOME') ||
         platformPath.join(homeDirectory({ env, platform }), '.config'));
 
-  return platformPath.normalize(platformPath.join(baseDir, 'harness-reset', CONFIG_FILE_NAME));
+  return platformPath.normalize(platformPath.join(baseDir, 'agent-warmup', CONFIG_FILE_NAME));
 }

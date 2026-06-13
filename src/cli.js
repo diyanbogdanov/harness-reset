@@ -25,9 +25,9 @@ import { configFilePath } from './platform.js';
 import { detectProvider, detectProviders } from './providers.js';
 import { inferWarmupTime } from './schedule.js';
 
-const USAGE = 'Usage: harness-reset <detect|plan|setup|update|remove|status> [--provider claude|codex] [--time HH:MM] [--lead-minutes N] [--dry-run] [--yes]';
+const USAGE = 'Usage: agent-warmup <detect|plan|setup|update|remove|status> [--provider claude|codex] [--time HH:MM] [--lead-minutes N] [--dry-run] [--yes]';
 const MIN_ACTIVE_DAYS = 5;
-const WARMUP_NAME = 'Harness Reset Warmup';
+const WARMUP_NAME = 'Agent Warmup';
 
 function defaultIo() {
   return {
@@ -283,7 +283,7 @@ function printNativeRemovalInstructions(io, provider) {
   if (provider === 'codex') {
     writeStdout(
       io,
-      'Native Codex Automation was not deleted. Remove or pause the "Harness Reset Warmup" automation in Codex Automations.\n',
+      'Native Codex Automation was not deleted. Remove or pause the "Agent Warmup" automation in Codex Automations.\n',
     );
   }
 }

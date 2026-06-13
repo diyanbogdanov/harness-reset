@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { PROVIDERS } from './constants.js';
 
-const WARMUP_NAME = 'Harness Reset Warmup';
+const WARMUP_NAME = 'Agent Warmup';
 const COMMON_METADATA_FIELDS = ['enabled', 'schedule', 'promptHash'];
 const PROVIDER_METADATA_FIELDS = {
   claude: ['routineName'],

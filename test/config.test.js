@@ -50,7 +50,7 @@ test('hashPrompt returns the sha256 digest with the expected prefix', () => {
 test('readConfig returns the default config when the file is missing', () => {
   const fs = createMemoryFs();
 
-  assert.deepEqual(readConfig('/tmp/harness-reset/config.json', { fs }), {
+  assert.deepEqual(readConfig('/tmp/agent-warmup/config.json', { fs }), {
     version: 1,
     providers: {},
   });
@@ -58,12 +58,12 @@ test('readConfig returns the default config when the file is missing', () => {
 
 test('readConfig keeps only supported provider metadata fields', () => {
   const fs = createMemoryFs({
-    '/tmp/harness-reset/config.json': JSON.stringify({
+    '/tmp/agent-warmup/config.json': JSON.stringify({
       version: 1,
       providers: {
         claude: {
           enabled: true,
-          routineName: 'Harness Reset Warmup',
+          routineName: 'Agent Warmup',
           schedule: 'daily at 08:30',
           promptHash: 'sha256:abc',
           apiKey: 'secret',
@@ -73,12 +73,12 @@ test('readConfig keeps only supported provider metadata fields', () => {
     }),
   });
 
-  assert.deepEqual(readConfig('/tmp/harness-reset/config.json', { fs }), {
+  assert.deepEqual(readConfig('/tmp/agent-warmup/config.json', { fs }), {
     version: 1,
     providers: {
       claude: {
         enabled: true,
-        routineName: 'Harness Reset Warmup',
+        routineName: 'Agent Warmup',
         schedule: 'daily at 08:30',
         promptHash: 'sha256:abc',
       },
@@ -95,10 +95,10 @@ test('writeConfig creates the parent directory and writes pretty JSON with a tra
     },
   };
 
-  writeConfig('/tmp/harness-reset/config.json', config, { fs });
+  writeConfig('/tmp/agent-warmup/config.json', config, { fs });
 
   assert.deepEqual(fs.state.mkdirCalls, [
-    { dirPath: '/tmp/harness-reset', options: { recursive: true } },
+    { dirPath: '/tmp/agent-warmup', options: { recursive: true } },
   ]);
   assert.equal(fs.state.writeCalls.length, 1);
   assert.equal(fs.state.writeCalls[0].contents, `${JSON.stringify(config, null, 2)}\n`);
@@ -109,18 +109,18 @@ test('writeConfig writes to a same-directory temp file before renaming into plac
   const fs = createMemoryFs();
   const config = { version: 1, providers: {} };
 
-  writeConfig('/tmp/harness-reset/config.json', config, { fs });
+  writeConfig('/tmp/agent-warmup/config.json', config, { fs });
 
   assert.equal(fs.state.writeCalls.length, 1);
   assert.equal(fs.state.renameCalls.length, 1);
 
   const tempPath = fs.state.writeCalls[0].filePath;
-  assert.equal(tempPath.startsWith('/tmp/harness-reset/.config.json.'), true);
+  assert.equal(tempPath.startsWith('/tmp/agent-warmup/.config.json.'), true);
   assert.equal(tempPath.endsWith('.tmp'), true);
   assert.deepEqual(fs.state.renameCalls, [
     {
       oldPath: tempPath,
-      newPath: '/tmp/harness-reset/config.json',
+      newPath: '/tmp/agent-warmup/config.json',
     },
   ]);
 });
@@ -133,7 +133,7 @@ test('buildProviderMetadata returns Claude routine metadata', () => {
     }),
     {
       enabled: true,
-      routineName: 'Harness Reset Warmup',
+      routineName: 'Agent Warmup',
       schedule: 'daily at 08:30',
       promptHash: hashPrompt('ok prompt'),
     },
@@ -148,7 +148,7 @@ test('buildProviderMetadata returns Codex automation metadata', () => {
     }),
     {
       enabled: true,
-      automationName: 'Harness Reset Warmup',
+      automationName: 'Agent Warmup',
       schedule: 'daily at 08:30',
       promptHash: hashPrompt('ok prompt'),
     },

@@ -247,7 +247,7 @@ test('setup dry-run for Codex prints fallback automation instructions', async ()
 
   assert.equal(exitCode, 0);
   assert.match(io.stdout, /Open a Codex thread/);
-  assert.match(io.stdout, /Harness Reset Warmup/);
+  assert.match(io.stdout, /Agent Warmup/);
   assert.equal(fs.writeCalls.length, 0);
   assert.equal(fs.renameCalls.length, 0);
 });
@@ -300,7 +300,7 @@ test('setup Codex with injected native creator writes metadata', async () => {
   assert.equal(exitCode, 0);
   assert.deepEqual(createCalls, [
     {
-      name: 'Harness Reset Warmup',
+      name: 'Agent Warmup',
       schedule: 'daily at 09:00',
       prompt:
         'Reply with exactly: ok\nDo not inspect files, do not run commands, do not modify anything, and do not use connectors or tools.',
@@ -308,11 +308,11 @@ test('setup Codex with injected native creator writes metadata', async () => {
   ]);
   assert.equal(fs.writeCalls.length, 1);
   assert.equal(fs.renameCalls.length, 1);
-  assert.match(fs.writeCalls[0].contents, /"automationName": "Harness Reset Warmup"/);
+  assert.match(fs.writeCalls[0].contents, /"automationName": "Agent Warmup"/);
 });
 
 test('status prints provider availability and current config JSON from injected config path', async () => {
-  const configPath = '/tmp/harness-reset/config.json';
+  const configPath = '/tmp/agent-warmup/config.json';
   const fs = createMemoryFs({
     '/bin/claude': '',
     '/home/alex/.claude': '',
@@ -321,7 +321,7 @@ test('status prints provider availability and current config JSON from injected 
       providers: {
         claude: {
           enabled: true,
-          routineName: 'Harness Reset Warmup',
+          routineName: 'Agent Warmup',
           schedule: 'daily at 09:00',
           promptHash: 'sha256:test',
         },
@@ -347,7 +347,7 @@ test('status prints provider availability and current config JSON from injected 
     providers: {
       claude: {
         enabled: true,
-        routineName: 'Harness Reset Warmup',
+        routineName: 'Agent Warmup',
         schedule: 'daily at 09:00',
         promptHash: 'sha256:test',
       },
@@ -416,20 +416,20 @@ test('update dry-run for Claude routes through setup behavior', async () => {
 });
 
 test('remove deletes local provider metadata and prints native removal instructions', async () => {
-  const configPath = '/tmp/harness-reset/config.json';
+  const configPath = '/tmp/agent-warmup/config.json';
   const fs = createMemoryFs({
     [configPath]: JSON.stringify({
       version: 1,
       providers: {
         claude: {
           enabled: true,
-          routineName: 'Harness Reset Warmup',
+          routineName: 'Agent Warmup',
           schedule: 'daily at 09:00',
           promptHash: 'sha256:test',
         },
         codex: {
           enabled: true,
-          automationName: 'Harness Reset Warmup',
+          automationName: 'Agent Warmup',
           schedule: 'daily at 10:00',
           promptHash: 'sha256:codex',
         },
@@ -454,7 +454,7 @@ test('remove deletes local provider metadata and prints native removal instructi
   assert.equal(writtenConfig.providers.claude, undefined);
   assert.deepEqual(writtenConfig.providers.codex, {
     enabled: true,
-    automationName: 'Harness Reset Warmup',
+    automationName: 'Agent Warmup',
     schedule: 'daily at 10:00',
     promptHash: 'sha256:codex',
   });
@@ -528,7 +528,7 @@ test('runCli prints usage when invoked with no args', async () => {
   const exitCode = await runCli([], { io });
 
   assert.equal(exitCode, 0);
-  assert.match(io.stdout, /^Usage: harness-reset/);
+  assert.match(io.stdout, /^Usage: agent-warmup/);
   assert.match(io.stdout, /update/);
   assert.match(io.stdout, /remove/);
 });
