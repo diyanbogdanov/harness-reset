@@ -92,7 +92,7 @@ test('default command shows suggestions when no agent-warmup setup is recorded',
   assert.match(io.stdout, /Agent Warmup/);
   assert.match(io.stdout, /No agent-warmup routines are recorded yet/);
   assert.match(io.stdout, /claude: installed \(2\.1\.104 \(Claude Code\)\)/);
-  assert.match(io.stdout, /claude: insufficient history/);
+  assert.match(io.stdout, /claude: insufficient usage-limit hit history/);
   assert.match(io.stdout, /Run: agent-warmup setup --provider claude --time HH:MM/);
   assert.deepEqual(
     spawn.calls.map((call) => [call.command, call.args]),
@@ -357,7 +357,7 @@ test('unsupported provider returns nonzero with a useful stderr message', async 
   assert.match(io.stderr, /claude, codex/);
 });
 
-test('setup without enough history and no time asks for explicit time', async () => {
+test('setup without enough limit-hit history and no time asks for explicit time', async () => {
   const fs = createMemoryFs({
     '/bin/claude': '',
     '/home/alex/.claude': '',
@@ -374,7 +374,7 @@ test('setup without enough history and no time asks for explicit time', async ()
   });
 
   assert.equal(exitCode, 1);
-  assert.match(io.stdout, /insufficient history/i);
+  assert.match(io.stdout, /insufficient usage-limit hit history/i);
   assert.match(io.stdout, /Re-run with --time HH:MM/);
 });
 
@@ -455,25 +455,28 @@ test('Claude schedule failure reports likely documented causes', async () => {
   assert.match(io.stderr, /org policy disabling routines/);
 });
 
-test('lead minutes rejects partial integer values', async () => {
+test('reset padding minutes rejects partial integer values', async () => {
   const io = createIo();
 
-  const exitCode = await runCli(['setup', '--provider', 'claude', '--lead-minutes', '1abc'], {
-    env: { HOME: '/home/alex', PATH: '/bin' },
-    fs: createMemoryFs(),
-    io,
-    platform: 'linux',
-  });
+  const exitCode = await runCli(
+    ['setup', '--provider', 'claude', '--reset-padding-minutes', '1abc'],
+    {
+      env: { HOME: '/home/alex', PATH: '/bin' },
+      fs: createMemoryFs(),
+      io,
+      platform: 'linux',
+    },
+  );
 
   assert.equal(exitCode, 1);
-  assert.match(io.stderr, /Invalid --lead-minutes/);
+  assert.match(io.stderr, /Invalid --reset-padding-minutes/);
   assert.match(io.stderr, /0\.\.1440/);
 });
 
-test('lead minutes rejects negative values', async () => {
+test('window minutes rejects negative values', async () => {
   const io = createIo();
 
-  const exitCode = await runCli(['setup', '--provider', 'claude', '--lead-minutes', '-40'], {
+  const exitCode = await runCli(['setup', '--provider', 'claude', '--window-minutes', '-40'], {
     env: { HOME: '/home/alex', PATH: '/bin' },
     fs: createMemoryFs(),
     io,
@@ -481,7 +484,7 @@ test('lead minutes rejects negative values', async () => {
   });
 
   assert.equal(exitCode, 1);
-  assert.match(io.stderr, /Invalid --lead-minutes/);
+  assert.match(io.stderr, /Invalid --window-minutes/);
   assert.match(io.stderr, /0\.\.1440/);
 });
 

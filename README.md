@@ -5,8 +5,8 @@ NPX-friendly setup CLI for native Claude Code Routines and Codex Automations.
 ## What it does
 
 - Shows installed `claude` and `codex` providers.
-- Looks at local state file modification times without reading prompt or response contents.
-- Suggests a daily warmup time, defaulting to 30 minutes before usual first activity.
+- Looks at local state file modification times and explicit timestamped usage-limit markers.
+- Suggests a daily warmup time that targets reset shortly after the usual usage-limit hit.
 - Creates a Claude Code Routine through the native `/schedule` flow.
 - Creates a Codex Automation when the host environment exposes a native automation creator.
 - Provides native Codex Automation instructions when direct creation is unavailable from a plain terminal.
@@ -17,6 +17,7 @@ NPX-friendly setup CLI for native Claude Code Routines and Codex Automations.
 - Does not run its own scheduler.
 - Does not create cron, launchd, systemd, Windows Task Scheduler, GitHub Actions, or Cloudflare Workers jobs.
 - Does not store provider credentials.
+- Does not store prompt or response contents.
 - Does not guarantee a reset window starts or improves; it creates or guides native scheduled warmup runs only.
 
 ## Usage

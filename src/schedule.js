@@ -24,11 +24,50 @@ function medianMinutes(minutes) {
   return Math.round((sorted[middle - 1] + sorted[middle]) / 2);
 }
 
-function clampDayMinutes(minutes) {
-  return Math.min(23 * 60 + 59, Math.max(0, minutes));
+const DAY_MINUTES = 24 * 60;
+
+function wrapDayMinutes(minutes) {
+  return ((minutes % DAY_MINUTES) + DAY_MINUTES) % DAY_MINUTES;
 }
 
-export function inferWarmupTime(samples, { leadMinutes, minActiveDays }) {
+function circularMedianMinutes(minutes) {
+  const sorted = [...minutes].sort((a, b) => a - b);
+
+  if (sorted.length <= 1) {
+    return sorted[0];
+  }
+
+  let largestGap = -1;
+  let startIndex = 0;
+
+  for (let index = 0; index < sorted.length; index += 1) {
+    const current = sorted[index];
+    const next = sorted[(index + 1) % sorted.length] + (index === sorted.length - 1 ? DAY_MINUTES : 0);
+    const gap = next - current;
+
+    if (gap > largestGap) {
+      largestGap = gap;
+      startIndex = (index + 1) % sorted.length;
+    }
+  }
+
+  const unwrapped = [];
+
+  for (let offset = 0; offset < sorted.length; offset += 1) {
+    const index = (startIndex + offset) % sorted.length;
+    let value = sorted[index];
+
+    if (offset > 0 && value < unwrapped[offset - 1]) {
+      value += DAY_MINUTES;
+    }
+
+    unwrapped.push(value);
+  }
+
+  return wrapDayMinutes(medianMinutes(unwrapped));
+}
+
+function firstMinutesByDay(samples) {
   const firstByDay = new Map();
 
   for (const sample of samples) {
@@ -41,24 +80,45 @@ export function inferWarmupTime(samples, { leadMinutes, minActiveDays }) {
     }
   }
 
-  const activeDays = firstByDay.size;
+  return firstByDay;
+}
 
-  if (activeDays < minActiveDays) {
+function addMinutes(minutes, offset) {
+  return wrapDayMinutes(minutes + offset);
+}
+
+export function inferWarmupTime(
+  samples,
+  {
+    limitHitSamples = [],
+    minLimitHitDays,
+    resetPaddingMinutes,
+    windowMinutes,
+  },
+) {
+  const limitHitByDay = firstMinutesByDay(limitHitSamples);
+  const limitHitDays = limitHitByDay.size;
+  const requiredDays = minLimitHitDays ?? 1;
+
+  if (limitHitDays < requiredDays) {
     return {
-      kind: 'insufficient-history',
-      activeDays,
-      requiredDays: minActiveDays,
+      kind: 'insufficient-limit-history',
+      limitHitDays,
+      requiredDays,
     };
   }
 
-  const firstActivityMinutes = medianMinutes([...firstByDay.values()]);
-  const warmupMinutes = clampDayMinutes(firstActivityMinutes - leadMinutes);
+  const limitHitMinutes = circularMedianMinutes([...limitHitByDay.values()]);
+  const targetResetMinutes = addMinutes(limitHitMinutes, resetPaddingMinutes);
+  const warmupMinutes = addMinutes(targetResetMinutes, -windowMinutes);
   const warmupTime = formatTime(warmupMinutes);
 
   return {
     kind: 'suggested',
-    activeDays,
-    firstActivity: formatTime(firstActivityMinutes),
+    strategy: 'limit-hit',
+    limitHitDays,
+    limitHit: formatTime(limitHitMinutes),
+    targetReset: formatTime(targetResetMinutes),
     warmupTime,
     schedule: `daily at ${warmupTime}`,
   };

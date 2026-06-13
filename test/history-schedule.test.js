@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { test } from 'node:test';
 
-import { collectActivitySamples } from '../src/history.js';
+import { collectActivitySamples, collectLimitHitSamples } from '../src/history.js';
 import { inferWarmupTime } from '../src/schedule.js';
 
 function createDirent(name, directory) {
@@ -43,7 +43,15 @@ function createMemoryFs(entries) {
 
       return { mtime: node.mtime };
     },
-    readFileSync() {
+    readFileSync(filePath, encoding) {
+      const node = nodes.get(filePath);
+
+      if (typeof node?.contents === 'string') {
+        assert.equal(encoding, 'utf8');
+        readFileSyncCalls += 1;
+        return node.contents;
+      }
+
       readFileSyncCalls += 1;
       throw new Error('collectActivitySamples must not read file contents');
     },
@@ -93,27 +101,122 @@ test('collectActivitySamples collects bounded file mtimes without reading file c
   assert.equal(fs.readFileSyncCalls, 0);
 });
 
-test('inferWarmupTime recommends lead time before median first activity', () => {
-  const samples = [
-    new Date(2026, 5, 8, 10, 0),
-    new Date(2026, 5, 9, 9, 15),
-    new Date(2026, 5, 10, 9, 30),
-    new Date(2026, 5, 11, 8, 45),
-    new Date(2026, 5, 12, 9, 45),
-    new Date(2026, 5, 12, 11, 0),
+test('collectLimitHitSamples extracts timestamped usage-limit events without returning contents', () => {
+  const rootDir = '/tmp/agent-warmup';
+  const sessionsDir = path.join(rootDir, 'sessions');
+  const now = new Date(2026, 5, 12, 12, 0);
+  const fs = createMemoryFs([
+    [rootDir, [{ name: 'sessions', type: 'dir' }, { name: 'skills', type: 'dir' }]],
+    [
+      sessionsDir,
+      [
+        { name: 'limit.jsonl', type: 'file' },
+        { name: 'no-time.jsonl', type: 'file' },
+        { name: 'discussion.jsonl', type: 'file' },
+        { name: 'normal.jsonl', type: 'file' },
+      ],
+    ],
+    [path.join(rootDir, 'skills'), [{ name: 'ignored.md', type: 'file' }]],
+    [
+      path.join(sessionsDir, 'limit.jsonl'),
+      {
+        contents:
+          '{"timestamp":"2026-06-10T11:00:00.000Z","message":"Usage limit reached. Please try again later."}\n',
+        mtime: new Date(2026, 5, 10, 11, 5),
+      },
+    ],
+    [
+      path.join(sessionsDir, 'no-time.jsonl'),
+      {
+        contents: '{"message":"Usage limit reached without timestamp should be ignored."}\n',
+        mtime: new Date(2026, 5, 10, 12, 0),
+      },
+    ],
+    [
+      path.join(sessionsDir, 'discussion.jsonl'),
+      {
+        contents:
+          '{"timestamp":"2026-06-10T13:00:00.000Z","message":"We discussed whether a message limit reached phrase should count."}\n',
+        mtime: new Date(2026, 5, 10, 13, 0),
+      },
+    ],
+    [
+      path.join(sessionsDir, 'normal.jsonl'),
+      {
+        contents: '{"timestamp":"2026-06-10T09:00:00.000Z","message":"ordinary work"}\n',
+        mtime: new Date(2026, 5, 10, 9, 0),
+      },
+    ],
+    [
+      path.join(rootDir, 'skills', 'ignored.md'),
+      {
+        contents: 'Usage limit reached in docs should not count.',
+        mtime: new Date(2026, 5, 10, 8, 0),
+      },
+    ],
+  ]);
+
+  const samples = collectLimitHitSamples(rootDir, { fs, now, maxDays: 7 });
+
+  assert.deepEqual(
+    samples.map((sample) => [sample.getUTCFullYear(), sample.getUTCMonth(), sample.getUTCDate(), sample.getUTCHours(), sample.getUTCMinutes()]),
+    [[2026, 5, 10, 11, 0]],
+  );
+  assert.equal(fs.readFileSyncCalls, 4);
+});
+
+test('inferWarmupTime recommends a warmup that makes the reset land after the usual limit hit', () => {
+  const limitHitSamples = [
+    new Date(2026, 5, 8, 11, 0),
+    new Date(2026, 5, 9, 10, 45),
+    new Date(2026, 5, 10, 11, 15),
+    new Date(2026, 5, 11, 11, 0),
+    new Date(2026, 5, 12, 11, 5),
   ];
 
-  assert.deepEqual(inferWarmupTime(samples, { leadMinutes: 30, minActiveDays: 5 }), {
+  assert.deepEqual(inferWarmupTime([], {
+    limitHitSamples,
+    minLimitHitDays: 5,
+    resetPaddingMinutes: 10,
+    windowMinutes: 300,
+  }), {
     kind: 'suggested',
-    activeDays: 5,
-    firstActivity: '09:30',
-    warmupTime: '09:00',
-    schedule: 'daily at 09:00',
+    strategy: 'limit-hit',
+    limitHitDays: 5,
+    limitHit: '11:00',
+    targetReset: '11:10',
+    warmupTime: '06:10',
+    schedule: 'daily at 06:10',
   });
 });
 
-test('inferWarmupTime clamps warmup time to the last minute of the day', () => {
-  const samples = [
+test('inferWarmupTime wraps early-morning limit hits to the previous evening warmup', () => {
+  const limitHitSamples = [
+    new Date(2026, 5, 8, 1, 0),
+    new Date(2026, 5, 9, 1, 0),
+    new Date(2026, 5, 10, 1, 0),
+    new Date(2026, 5, 11, 1, 0),
+    new Date(2026, 5, 12, 1, 0),
+  ];
+
+  assert.deepEqual(inferWarmupTime([], {
+    limitHitSamples,
+    minLimitHitDays: 5,
+    resetPaddingMinutes: 10,
+    windowMinutes: 300,
+  }), {
+    kind: 'suggested',
+    strategy: 'limit-hit',
+    limitHitDays: 5,
+    limitHit: '01:00',
+    targetReset: '01:10',
+    warmupTime: '20:10',
+    schedule: 'daily at 20:10',
+  });
+});
+
+test('inferWarmupTime wraps late-night target reset into the next day', () => {
+  const limitHitSamples = [
     new Date(2026, 5, 8, 23, 50),
     new Date(2026, 5, 9, 23, 45),
     new Date(2026, 5, 10, 23, 40),
@@ -121,21 +224,70 @@ test('inferWarmupTime clamps warmup time to the last minute of the day', () => {
     new Date(2026, 5, 12, 23, 50),
   ];
 
-  assert.deepEqual(inferWarmupTime(samples, { leadMinutes: -40, minActiveDays: 5 }), {
+  assert.deepEqual(inferWarmupTime([], {
+    limitHitSamples,
+    minLimitHitDays: 5,
+    resetPaddingMinutes: 10,
+    windowMinutes: 300,
+  }), {
     kind: 'suggested',
-    activeDays: 5,
-    firstActivity: '23:50',
-    warmupTime: '23:59',
-    schedule: 'daily at 23:59',
+    strategy: 'limit-hit',
+    limitHitDays: 5,
+    limitHit: '23:50',
+    targetReset: '00:00',
+    warmupTime: '19:00',
+    schedule: 'daily at 19:00',
   });
 });
 
-test('inferWarmupTime reports insufficient history before the minimum active days', () => {
-  const samples = [new Date(2026, 5, 10, 9, 30), new Date(2026, 5, 11, 10, 0)];
+test('inferWarmupTime treats limit-hit clusters across midnight as one cluster', () => {
+  const limitHitSamples = [
+    new Date(2026, 5, 8, 23, 50),
+    new Date(2026, 5, 9, 23, 55),
+    new Date(2026, 5, 11, 0, 5),
+    new Date(2026, 5, 12, 0, 10),
+  ];
 
-  assert.deepEqual(inferWarmupTime(samples, { leadMinutes: 30, minActiveDays: 5 }), {
-    kind: 'insufficient-history',
-    activeDays: 2,
+  assert.deepEqual(inferWarmupTime([], {
+    limitHitSamples,
+    minLimitHitDays: 4,
+    resetPaddingMinutes: 10,
+    windowMinutes: 300,
+  }), {
+    kind: 'suggested',
+    strategy: 'limit-hit',
+    limitHitDays: 4,
+    limitHit: '00:00',
+    targetReset: '00:10',
+    warmupTime: '19:10',
+    schedule: 'daily at 19:10',
+  });
+});
+
+test('inferWarmupTime refuses to invent a schedule without enough limit-hit evidence', () => {
+  assert.deepEqual(inferWarmupTime([], {
+    limitHitSamples: [],
+    minLimitHitDays: 5,
+    resetPaddingMinutes: 10,
+    windowMinutes: 300,
+  }), {
+    kind: 'insufficient-limit-history',
+    limitHitDays: 0,
+    requiredDays: 5,
+  });
+});
+
+test('inferWarmupTime reports insufficient limit-hit history before the minimum days', () => {
+  const limitHitSamples = [new Date(2026, 5, 10, 9, 30), new Date(2026, 5, 11, 10, 0)];
+
+  assert.deepEqual(inferWarmupTime([], {
+    limitHitSamples,
+    minLimitHitDays: 5,
+    resetPaddingMinutes: 10,
+    windowMinutes: 300,
+  }), {
+    kind: 'insufficient-limit-history',
+    limitHitDays: 2,
     requiredDays: 5,
   });
 });

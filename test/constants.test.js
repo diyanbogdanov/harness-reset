@@ -3,8 +3,9 @@ import { test } from 'node:test';
 
 import {
   CONFIG_FILE_NAME,
-  DEFAULT_LEAD_MINUTES,
+  DEFAULT_LIMIT_WINDOW_MINUTES,
   DEFAULT_PROMPT,
+  DEFAULT_RESET_PADDING_MINUTES,
   PROVIDERS,
 } from '../src/constants.js';
 
@@ -22,8 +23,12 @@ test('exports the safe default prompt for low-cost warmup runs', () => {
   );
 });
 
-test('exports the default lead time in minutes', () => {
-  assert.equal(DEFAULT_LEAD_MINUTES, 30);
+test('exports the default limit window in minutes', () => {
+  assert.equal(DEFAULT_LIMIT_WINDOW_MINUTES, 300);
+});
+
+test('exports the default reset padding in minutes', () => {
+  assert.equal(DEFAULT_RESET_PADDING_MINUTES, 10);
 });
 
 test('exports the config file name used by the CLI', () => {

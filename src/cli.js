@@ -16,17 +16,18 @@ import {
   writeConfig,
 } from './config.js';
 import {
-  DEFAULT_LEAD_MINUTES,
+  DEFAULT_LIMIT_WINDOW_MINUTES,
   DEFAULT_PROMPT,
+  DEFAULT_RESET_PADDING_MINUTES,
   PROVIDERS,
 } from './constants.js';
-import { collectActivitySamples } from './history.js';
+import { collectLimitHitSamples } from './history.js';
 import { configFilePath } from './platform.js';
 import { detectProvider, detectProviders } from './providers.js';
 import { inferWarmupTime } from './schedule.js';
 
-const USAGE = 'Usage: agent-warmup [setup|remove] [--provider claude|codex] [--time HH:MM] [--lead-minutes N] [--dry-run] [--yes]';
-const MIN_ACTIVE_DAYS = 5;
+const USAGE = 'Usage: agent-warmup [setup|remove] [--provider claude|codex] [--time HH:MM] [--window-minutes N] [--reset-padding-minutes N] [--dry-run] [--yes]';
+const MIN_LIMIT_HIT_DAYS = 5;
 const WARMUP_NAME = 'Agent Warmup';
 
 function defaultIo() {
@@ -79,7 +80,8 @@ function parseArgs(argv) {
     dryRun: false,
     yes: false,
     time: null,
-    leadMinutes: DEFAULT_LEAD_MINUTES,
+    resetPaddingMinutes: DEFAULT_RESET_PADDING_MINUTES,
+    windowMinutes: DEFAULT_LIMIT_WINDOW_MINUTES,
   };
 
   for (let index = 1; index < argv.length; index += 1) {
@@ -107,9 +109,16 @@ function parseArgs(argv) {
       continue;
     }
 
-    if (arg === '--lead-minutes') {
-      parsed.leadMinutesRaw = argv[index + 1] || '';
-      parsed.leadMinutes = Number.parseInt(parsed.leadMinutesRaw, 10);
+    if (arg === '--reset-padding-minutes') {
+      parsed.resetPaddingMinutesRaw = argv[index + 1] || '';
+      parsed.resetPaddingMinutes = Number.parseInt(parsed.resetPaddingMinutesRaw, 10);
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--window-minutes') {
+      parsed.windowMinutesRaw = argv[index + 1] || '';
+      parsed.windowMinutes = Number.parseInt(parsed.windowMinutesRaw, 10);
       index += 1;
       continue;
     }
@@ -177,7 +186,7 @@ function printConfiguredProviders(io, config) {
   return configured.length;
 }
 
-function printSetupSuggestions(io, results, config, { fs, leadMinutes }) {
+function printSetupSuggestions(io, results, config, { fs, resetPaddingMinutes, windowMinutes }) {
   const providersWithoutConfig = results.filter((result) => !config.providers[result.provider]);
 
   if (providersWithoutConfig.length === 0) {
@@ -192,19 +201,23 @@ function printSetupSuggestions(io, results, config, { fs, leadMinutes }) {
       continue;
     }
 
-    const scheduleResult = inferScheduleResult(result, { fs, leadMinutes });
+    const scheduleResult = inferScheduleResult(result, {
+      fs,
+      resetPaddingMinutes,
+      windowMinutes,
+    });
 
-    if (scheduleResult.kind === 'insufficient-history') {
+    if (scheduleResult.kind === 'insufficient-limit-history') {
       writeStdout(
         io,
-        `  ${result.provider}: insufficient history (${scheduleResult.activeDays}/${scheduleResult.requiredDays} active days). Run: agent-warmup setup --provider ${result.provider} --time HH:MM\n`,
+        `  ${result.provider}: insufficient usage-limit hit history (${scheduleResult.limitHitDays}/${scheduleResult.requiredDays} days). Run: agent-warmup setup --provider ${result.provider} --time HH:MM\n`,
       );
       continue;
     }
 
     writeStdout(
       io,
-      `  ${result.provider}: ${scheduleResult.schedule} based on ${scheduleResult.activeDays} active days; usual first activity ${scheduleResult.firstActivity}. Run: agent-warmup setup --provider ${result.provider}\n`,
+      `  ${result.provider}: ${scheduleResult.schedule} based on ${scheduleResult.limitHitDays} limit-hit days; usual limit hit ${scheduleResult.limitHit}, target reset ${scheduleResult.targetReset}. Run: agent-warmup setup --provider ${result.provider}\n`,
     );
   }
 }
@@ -256,17 +269,19 @@ function scheduleFromTime(time, io) {
   };
 }
 
-function inferSchedule(providerInfo, { fs, leadMinutes, io }) {
-  const samples = collectActivitySamples(providerInfo.stateDir, { fs });
-  const result = inferWarmupTime(samples, {
-    leadMinutes,
-    minActiveDays: MIN_ACTIVE_DAYS,
+function inferSchedule(providerInfo, { fs, resetPaddingMinutes, windowMinutes, io }) {
+  const limitHitSamples = collectLimitHitSamples(providerInfo.stateDir, { fs });
+  const result = inferWarmupTime([], {
+    limitHitSamples,
+    minLimitHitDays: MIN_LIMIT_HIT_DAYS,
+    resetPaddingMinutes,
+    windowMinutes,
   });
 
-  if (result.kind === 'insufficient-history') {
+  if (result.kind === 'insufficient-limit-history') {
     writeStdout(
       io,
-      `${providerInfo.provider}: insufficient history (${result.activeDays}/${result.requiredDays} active days). Re-run with --time HH:MM.\n`,
+      `${providerInfo.provider}: insufficient usage-limit hit history (${result.limitHitDays}/${result.requiredDays} days). Re-run with --time HH:MM.\n`,
     );
     return null;
   }
@@ -274,11 +289,13 @@ function inferSchedule(providerInfo, { fs, leadMinutes, io }) {
   return result;
 }
 
-function inferScheduleResult(providerInfo, { fs, leadMinutes }) {
-  const samples = collectActivitySamples(providerInfo.stateDir, { fs });
-  return inferWarmupTime(samples, {
-    leadMinutes,
-    minActiveDays: MIN_ACTIVE_DAYS,
+function inferScheduleResult(providerInfo, { fs, resetPaddingMinutes, windowMinutes }) {
+  const limitHitSamples = collectLimitHitSamples(providerInfo.stateDir, { fs });
+  return inferWarmupTime([], {
+    limitHitSamples,
+    minLimitHitDays: MIN_LIMIT_HIT_DAYS,
+    resetPaddingMinutes,
+    windowMinutes,
   });
 }
 
@@ -487,7 +504,12 @@ async function runSetup(parsed, deps) {
 
     const scheduleResult =
       parsed.time === null
-        ? inferSchedule(providerInfo, { fs: depFs, leadMinutes: parsed.leadMinutes, io })
+        ? inferSchedule(providerInfo, {
+            fs: depFs,
+            resetPaddingMinutes: parsed.resetPaddingMinutes,
+            windowMinutes: parsed.windowMinutes,
+            io,
+          })
         : scheduleFromTime(parsed.time, io);
 
     if (scheduleResult === null) {
@@ -590,7 +612,8 @@ function runDashboard(parsed, deps) {
 
   printSetupSuggestions(io, detectionResults, config, {
     fs: depFs,
-    leadMinutes: parsed.leadMinutes,
+    resetPaddingMinutes: parsed.resetPaddingMinutes,
+    windowMinutes: parsed.windowMinutes,
   });
 
   return 0;
@@ -629,10 +652,21 @@ export async function runCli(argv = process.argv.slice(2), deps = {}) {
   }
 
   if (
-    parsed.leadMinutesRaw !== undefined &&
-    (!/^\d+$/.test(parsed.leadMinutesRaw) || parsed.leadMinutes > 1440)
+    parsed.resetPaddingMinutesRaw !== undefined &&
+    (!/^\d+$/.test(parsed.resetPaddingMinutesRaw) || parsed.resetPaddingMinutes > 1440)
   ) {
-    writeStderr(io, 'Invalid --lead-minutes value. Expected an integer in range 0..1440.\n');
+    writeStderr(
+      io,
+      'Invalid --reset-padding-minutes value. Expected an integer in range 0..1440.\n',
+    );
+    return 1;
+  }
+
+  if (
+    parsed.windowMinutesRaw !== undefined &&
+    (!/^\d+$/.test(parsed.windowMinutesRaw) || parsed.windowMinutes > 1440)
+  ) {
+    writeStderr(io, 'Invalid --window-minutes value. Expected an integer in range 0..1440.\n');
     return 1;
   }
 
