@@ -154,3 +154,20 @@ test('buildProviderMetadata returns Codex automation metadata', () => {
     },
   );
 });
+
+test('buildProviderMetadata stores multiple warmup schedules when present', () => {
+  assert.deepEqual(
+    buildProviderMetadata('codex', {
+      schedule: 'daily at 06:10, daily at 11:11',
+      schedules: ['daily at 06:10', 'daily at 11:11'],
+      prompt: 'ok prompt',
+    }),
+    {
+      enabled: true,
+      automationName: 'Agent Warmup',
+      schedule: 'daily at 06:10, daily at 11:11',
+      schedules: ['daily at 06:10', 'daily at 11:11'],
+      promptHash: hashPrompt('ok prompt'),
+    },
+  );
+});

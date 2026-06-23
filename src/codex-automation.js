@@ -8,6 +8,7 @@ export const CODEX_WARMUP_AUTOMATION_ID = 'agent-warmup';
 const CODEX_AUTOMATION_MODEL = 'gpt-5.3-codex-spark';
 const CODEX_AUTOMATION_REASONING_EFFORT = 'minimal';
 const DAILY_DAYS = 'MO,TU,WE,TH,FR,SA,SU';
+const MAX_CODEX_WARMUP_AUTOMATIONS = 24;
 
 function pathForPlatform(platform) {
   return platform === 'win32' ? path.win32 : path.posix;
@@ -18,18 +19,22 @@ function codexHomeDir({ env = process.env, platform = process.platform } = {}) {
   return platformPath.normalize(env.CODEX_HOME || providerStateDir('codex', { env, platform }));
 }
 
-function automationDir({ env, platform }) {
+export function codexAutomationIdForIndex(index) {
+  return index === 0 ? CODEX_WARMUP_AUTOMATION_ID : `${CODEX_WARMUP_AUTOMATION_ID}-${index + 1}`;
+}
+
+function automationDir({ env, platform, id = CODEX_WARMUP_AUTOMATION_ID }) {
   const platformPath = pathForPlatform(platform);
   return platformPath.join(
     codexHomeDir({ env, platform }),
     'automations',
-    CODEX_WARMUP_AUTOMATION_ID,
+    id,
   );
 }
 
-function automationFilePath({ env, platform }) {
+function automationFilePath({ env, platform, id = CODEX_WARMUP_AUTOMATION_ID }) {
   const platformPath = pathForPlatform(platform);
-  return platformPath.join(automationDir({ env, platform }), 'automation.toml');
+  return platformPath.join(automationDir({ env, platform, id }), 'automation.toml');
 }
 
 export function codexAutomationFilePath(options = {}) {
@@ -44,14 +49,34 @@ export function codexAutomationExists({
   return fs.existsSync(automationFilePath({ env, platform }));
 }
 
-export function dailyScheduleToRrule(schedule) {
+function parseDailySchedule(schedule) {
   const match = /^daily at ([01]\d|2[0-3]):([0-5]\d)$/.exec(schedule);
 
   if (!match) {
     throw new Error(`Unsupported Codex automation schedule: ${schedule}`);
   }
 
-  return `FREQ=WEEKLY;BYDAY=${DAILY_DAYS};BYHOUR=${Number(match[1])};BYMINUTE=${Number(match[2])}`;
+  return {
+    hour: Number(match[1]),
+    minute: Number(match[2]),
+  };
+}
+
+export function dailyScheduleToRrule(schedule) {
+  const parsed = parseDailySchedule(schedule);
+  return `FREQ=WEEKLY;BYDAY=${DAILY_DAYS};BYHOUR=${parsed.hour};BYMINUTE=${parsed.minute}`;
+}
+
+export function dailySchedulesToRrule(schedules) {
+  const parsedSchedules = schedules.map(parseDailySchedule);
+  const minute = parsedSchedules[0]?.minute;
+
+  if (minute === undefined || parsedSchedules.some((schedule) => schedule.minute !== minute)) {
+    return null;
+  }
+
+  const hours = [...new Set(parsedSchedules.map((schedule) => schedule.hour))];
+  return `FREQ=WEEKLY;BYDAY=${DAILY_DAYS};BYHOUR=${hours.join(',')};BYMINUTE=${minute}`;
 }
 
 function tomlString(value) {
@@ -71,26 +96,29 @@ export function writeCodexAutomation({
   cwd = process.cwd(),
   env = process.env,
   fs = nodeFs,
+  id = CODEX_WARMUP_AUTOMATION_ID,
+  name = 'Agent Warmup',
   now = Date.now,
   platform = process.platform,
   prompt,
+  rrule,
   schedule,
 } = {}) {
   const platformPath = pathForPlatform(platform);
-  const dirPath = automationDir({ env, platform });
-  const filePath = automationFilePath({ env, platform });
+  const dirPath = automationDir({ env, platform, id });
+  const filePath = automationFilePath({ env, platform, id });
   const timestamp = now();
   const createdAt = readCreatedAt(filePath, { fs, fallback: timestamp });
-  const rrule = dailyScheduleToRrule(schedule);
+  const automationRrule = rrule || dailyScheduleToRrule(schedule);
   const tempPath = platformPath.join(dirPath, `.automation.toml.${process.pid}.${timestamp}.tmp`);
   const contents = [
     'version = 1',
-    `id = ${tomlString(CODEX_WARMUP_AUTOMATION_ID)}`,
+    `id = ${tomlString(id)}`,
     'kind = "cron"',
-    'name = "Agent Warmup"',
+    `name = ${tomlString(name)}`,
     `prompt = ${tomlString(prompt)}`,
     'status = "ACTIVE"',
-    `rrule = ${tomlString(rrule)}`,
+    `rrule = ${tomlString(automationRrule)}`,
     `model = ${tomlString(CODEX_AUTOMATION_MODEL)}`,
     `reasoning_effort = ${tomlString(CODEX_AUTOMATION_REASONING_EFFORT)}`,
     'execution_environment = "local"',
@@ -104,7 +132,7 @@ export function writeCodexAutomation({
   fs.writeFileSync(tempPath, contents, 'utf8');
   fs.renameSync(tempPath, filePath);
 
-  return { filePath, id: CODEX_WARMUP_AUTOMATION_ID, rrule };
+  return { filePath, id, rrule: automationRrule };
 }
 
 export function removeCodexAutomation({
@@ -112,10 +140,15 @@ export function removeCodexAutomation({
   fs = nodeFs,
   platform = process.platform,
 } = {}) {
-  const dirPath = automationDir({ env, platform });
-  const filePath = automationFilePath({ env, platform });
-  const existed = fs.existsSync(filePath) || fs.existsSync(dirPath);
+  let existed = false;
 
-  fs.rmSync(dirPath, { recursive: true, force: true });
+  for (let index = 0; index < MAX_CODEX_WARMUP_AUTOMATIONS; index += 1) {
+    const id = codexAutomationIdForIndex(index);
+    const dirPath = automationDir({ env, platform, id });
+    const filePath = automationFilePath({ env, platform, id });
+    existed = existed || fs.existsSync(filePath) || fs.existsSync(dirPath);
+    fs.rmSync(dirPath, { recursive: true, force: true });
+  }
+
   return existed;
 }

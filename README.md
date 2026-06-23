@@ -6,9 +6,9 @@ NPX-friendly setup CLI for native Claude Code Routines and Codex Automations.
 
 - Shows installed `claude` and `codex` providers.
 - Looks at explicit timestamped usage-limit markers in local harness state.
-- Suggests a daily warmup time that targets reset shortly after the usual usage-limit hit.
-- Creates a Claude Code Routine through the native `/schedule` flow.
-- Creates a Codex Automation by writing the native Codex automation record under `$CODEX_HOME/automations`, or `~/.codex/automations` when `CODEX_HOME` is unset.
+- Suggests daily warmup times that target resets shortly after usual usage-limit hits.
+- Creates Claude Code Routines through the native `/schedule` flow.
+- Creates Codex Automations by writing native Codex automation records under `$CODEX_HOME/automations`, or `~/.codex/automations` when `CODEX_HOME` is unset.
 - Records local metadata for warmup schedules created by `agent-warmup`.
 
 ## What it does not do
@@ -17,7 +17,7 @@ NPX-friendly setup CLI for native Claude Code Routines and Codex Automations.
 - Does not create cron, launchd, systemd, Windows Task Scheduler, GitHub Actions, or Cloudflare Workers jobs.
 - Does not store provider credentials.
 - Does not store prompt or response contents.
-- Does not guarantee a reset window starts or improves; it creates native scheduled warmup runs only.
+- Does not guarantee reset windows start or improve; it creates native scheduled warmup runs only.
 
 ## Usage
 
@@ -52,6 +52,8 @@ Use `--dry-run` to preview the native action without creating anything.
 `setup` does not overwrite existing agent-warmup routines or automations. Run `agent-warmup remove --provider claude` or `agent-warmup remove --provider codex` first, then run setup again.
 
 Use `remove` to delete local agent-warmup metadata. For Codex, it also removes the native `agent-warmup` automation file. For Claude Code, it prints provider-specific instructions because Claude Code does not expose a routine deletion command through the CLI.
+
+When local history shows multiple daily usage-limit hits, setup may create multiple native routines or automations. Overlapping inferred windows are pushed to start at least one minute after the previous target reset.
 
 Claude Code Routines consume normal Claude plan usage. Codex Automations consume normal Codex usage and can affect weekly usage limits.
 

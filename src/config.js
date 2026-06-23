@@ -5,7 +5,7 @@ import path from 'node:path';
 import { PROVIDERS } from './constants.js';
 
 const WARMUP_NAME = 'Agent Warmup';
-const COMMON_METADATA_FIELDS = ['enabled', 'schedule', 'promptHash'];
+const COMMON_METADATA_FIELDS = ['enabled', 'schedule', 'schedules', 'promptHash'];
 const PROVIDER_METADATA_FIELDS = {
   claude: ['routineName'],
   codex: ['automationName'],
@@ -57,12 +57,16 @@ export function writeConfig(filePath, config, { fs = nodeFs } = {}) {
   fs.renameSync(tempPath, filePath);
 }
 
-export function buildProviderMetadata(provider, { schedule, prompt }) {
+export function buildProviderMetadata(provider, { schedule, schedules, prompt }) {
   const metadata = {
     enabled: true,
     schedule,
     promptHash: hashPrompt(prompt),
   };
+
+  if (Array.isArray(schedules) && schedules.length > 1) {
+    metadata.schedules = schedules;
+  }
 
   if (provider === 'claude') {
     return {
