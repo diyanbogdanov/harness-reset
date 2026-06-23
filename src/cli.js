@@ -16,7 +16,9 @@ import {
   writeConfig,
 } from './config.js';
 import {
+  codexAutomationIdForIndex,
   codexAutomationExists,
+  dailySchedulesToRrule,
   removeCodexAutomation,
   writeCodexAutomation,
 } from './codex-automation.js';
@@ -35,7 +37,7 @@ import { createUi } from './ui.js';
 const USAGE = 'Usage: agent-warmup [setup|remove] [--provider claude|codex] [--time HH:MM] [--window-minutes N] [--reset-padding-minutes N] [--dry-run] [--plain]';
 const MIN_LIMIT_HIT_DAYS = 5;
 const WARMUP_NAME = 'Agent Warmup';
-const CLAUDE_PRINT_MODE_ARGS = ['-p', '--model', 'sonnet', '--effort', 'low', '--output-format', 'json'];
+const CLAUDE_PRINT_MODE_ARGS = ['-p', '--model', 'fable', '--effort', 'low', '--output-format', 'json'];
 
 function defaultIo() {
   return {
@@ -388,6 +390,7 @@ function scheduleFromTime(time, io) {
     kind: 'explicit',
     activeDays: null,
     schedule: `daily at ${time}`,
+    schedules: [`daily at ${time}`],
     warmupTime: time,
   };
 }
@@ -433,14 +436,14 @@ function printSetupSummary(io, { provider, schedule, prompt, dryRun }) {
   writeStdout(io, `Warning: ${usageWarning(provider)}\n`);
 }
 
-function writeProviderConfig(provider, { env, platform, fs, schedule, prompt }) {
+function writeProviderConfig(provider, { env, platform, fs, schedule, schedules, prompt }) {
   const filePath = configFilePath({ env, platform });
   const currentConfig = readConfig(filePath, { fs });
   const nextConfig = {
     ...currentConfig,
     providers: {
       ...currentConfig.providers,
-      [provider]: buildProviderMetadata(provider, { schedule, prompt }),
+      [provider]: buildProviderMetadata(provider, { schedule, schedules, prompt }),
     },
   };
 
@@ -528,49 +531,60 @@ async function setupClaude({
   spawnSync,
   executable,
   schedule,
+  schedules,
   prompt,
   dryRun,
 }) {
-  const action = buildClaudeScheduleAction({ schedule, prompt });
-  const printArgs = buildClaudePrintArgs(action.args);
+  const scheduleList = schedules || [schedule];
+  const printArgsBySchedule = scheduleList.map((currentSchedule) => {
+    const action = buildClaudeScheduleAction({ schedule: currentSchedule, prompt });
+    return {
+      action,
+      printArgs: buildClaudePrintArgs(action.args),
+    };
+  });
 
-  writeStdout(io, `Native action: ${action.command} ${printArgs.map(shellQuote).join(' ')}\n`);
+  for (const { action, printArgs } of printArgsBySchedule) {
+    writeStdout(io, `Native action: ${action.command} ${printArgs.map(shellQuote).join(' ')}\n`);
+  }
 
   if (dryRun) {
     return 0;
   }
 
-  const invocation = buildClaudeSetupInvocation({
-    executable,
-    platform,
-    args: printArgs,
-  });
-  const result = spawnSync(invocation.command, invocation.args, {
-    encoding: 'utf8',
-    env,
-  });
+  for (const { printArgs } of printArgsBySchedule) {
+    const invocation = buildClaudeSetupInvocation({
+      executable,
+      platform,
+      args: printArgs,
+    });
+    const result = spawnSync(invocation.command, invocation.args, {
+      encoding: 'utf8',
+      env,
+    });
 
-  if (result.status !== 0) {
-    printClaudeScheduleFailure(io, result.status);
-    return 1;
+    if (result.status !== 0) {
+      printClaudeScheduleFailure(io, result.status);
+      return 1;
+    }
+
+    const printResult = parseClaudePrintResult(result.stdout || '');
+    if (!printResult.created) {
+      writeStderr(
+        io,
+        'Claude schedule command exited but did not confirm routine creation. Native output was:\n',
+      );
+      writeStderr(io, `${printResult.message || result.stdout || result.stderr || '(empty output)'}\n`);
+      return 1;
+    }
+
+    writeStdout(io, 'Created Claude Code Routine.\n');
+    if (printResult.message) {
+      writeStdout(io, `${printResult.message}\n`);
+    }
   }
 
-  const printResult = parseClaudePrintResult(result.stdout || '');
-  if (!printResult.created) {
-    writeStderr(
-      io,
-      'Claude schedule command exited but did not confirm routine creation. Native output was:\n',
-    );
-    writeStderr(io, `${printResult.message || result.stdout || result.stderr || '(empty output)'}\n`);
-    return 1;
-  }
-
-  writeStdout(io, 'Created Claude Code Routine.\n');
-  if (printResult.message) {
-    writeStdout(io, `${printResult.message}\n`);
-  }
-
-  writeProviderConfig('claude', { env, platform, fs, schedule, prompt });
+  writeProviderConfig('claude', { env, platform, fs, schedule, schedules: scheduleList, prompt });
   return 0;
 }
 
@@ -582,11 +596,13 @@ async function setupCodex({
   cwd,
   now,
   schedule,
+  schedules,
   prompt,
   dryRun,
   codexAutomationCreate,
 }) {
   const action = buildCodexAutomationAction({ schedule, prompt });
+  const scheduleList = schedules || [schedule];
 
   if (dryRun) {
     writeStdout(io, `${action.description}\n`);
@@ -594,20 +610,41 @@ async function setupCodex({
   }
 
   if (typeof codexAutomationCreate === 'function') {
-    await codexAutomationCreate({
-      name: WARMUP_NAME,
-      schedule,
-      prompt,
-    });
-    writeProviderConfig('codex', { env, platform, fs, schedule, prompt });
+    for (const [index, currentSchedule] of scheduleList.entries()) {
+      await codexAutomationCreate({
+        name: index === 0 ? WARMUP_NAME : `${WARMUP_NAME} ${index + 1}`,
+        schedule: currentSchedule,
+        prompt,
+      });
+    }
+    writeProviderConfig('codex', { env, platform, fs, schedule, schedules: scheduleList, prompt });
     return 0;
   }
 
-  const automation = writeCodexAutomation({ cwd, env, fs, now, platform, prompt, schedule });
-  writeStdout(io, `Created Codex Automation: ${automation.id}\n`);
-  writeStdout(io, `Native file: ${automation.filePath}\n`);
+  const combinedRrule = scheduleList.length > 1 ? dailySchedulesToRrule(scheduleList) : null;
+  const codexSchedules = combinedRrule
+    ? [{ index: 0, rrule: combinedRrule, schedule: scheduleList[0] }]
+    : scheduleList.map((currentSchedule, index) => ({ index, schedule: currentSchedule }));
+
+  for (const { index, rrule, schedule: currentSchedule } of codexSchedules) {
+    const id = codexAutomationIdForIndex(index);
+    const automation = writeCodexAutomation({
+      cwd,
+      env,
+      fs,
+      id,
+      name: index === 0 ? WARMUP_NAME : `${WARMUP_NAME} ${index + 1}`,
+      now,
+      platform,
+      prompt,
+      rrule,
+      schedule: currentSchedule,
+    });
+    writeStdout(io, `Created Codex Automation: ${automation.id}\n`);
+    writeStdout(io, `Native file: ${automation.filePath}\n`);
+  }
   writeStdout(io, `Workspace: ${cwd}\n`);
-  writeProviderConfig('codex', { env, platform, fs, schedule, prompt });
+  writeProviderConfig('codex', { env, platform, fs, schedule, schedules: scheduleList, prompt });
   return 0;
 }
 
@@ -653,6 +690,7 @@ async function runSetup(parsed, deps) {
     }
 
     const schedule = scheduleResult.schedule;
+    const schedules = scheduleResult.schedules || [schedule];
     const prompt = DEFAULT_PROMPT;
 
     printSetupSummary(io, {
@@ -672,6 +710,7 @@ async function runSetup(parsed, deps) {
             spawnSync,
             executable: providerInfo.executable,
             schedule,
+            schedules,
             prompt,
             dryRun: parsed.dryRun,
           })
@@ -683,6 +722,7 @@ async function runSetup(parsed, deps) {
             cwd,
             now,
             schedule,
+            schedules,
             prompt,
             dryRun: parsed.dryRun,
             codexAutomationCreate,

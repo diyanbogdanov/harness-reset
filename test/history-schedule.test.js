@@ -187,6 +187,194 @@ test('inferWarmupTime recommends a warmup that makes the reset land after the us
     targetReset: '11:10',
     warmupTime: '06:10',
     schedule: 'daily at 06:10',
+    schedules: ['daily at 06:10'],
+    windows: [
+      {
+        evidenceDays: 5,
+        limitHit: '11:00',
+        targetReset: '11:10',
+        warmupTime: '06:10',
+        schedule: 'daily at 06:10',
+      },
+    ],
+  });
+});
+
+test('inferWarmupTime recommends independent warmups for separate daily limit hits', () => {
+  const limitHitSamples = [
+    new Date(2026, 5, 8, 11, 0),
+    new Date(2026, 5, 8, 19, 0),
+    new Date(2026, 5, 9, 10, 45),
+    new Date(2026, 5, 9, 18, 45),
+    new Date(2026, 5, 10, 11, 15),
+    new Date(2026, 5, 10, 19, 15),
+    new Date(2026, 5, 11, 11, 0),
+    new Date(2026, 5, 11, 19, 0),
+    new Date(2026, 5, 12, 11, 5),
+    new Date(2026, 5, 12, 19, 5),
+  ];
+
+  assert.deepEqual(inferWarmupTime([], {
+    limitHitSamples,
+    minLimitHitDays: 5,
+    resetPaddingMinutes: 10,
+    windowMinutes: 300,
+  }), {
+    kind: 'suggested',
+    strategy: 'limit-hit',
+    limitHitDays: 5,
+    limitHit: '11:00',
+    targetReset: '11:10',
+    warmupTime: '06:10',
+    schedule: 'daily at 06:10, daily at 14:10',
+    schedules: ['daily at 06:10', 'daily at 14:10'],
+    windows: [
+      {
+        evidenceDays: 5,
+        limitHit: '11:00',
+        targetReset: '11:10',
+        warmupTime: '06:10',
+        schedule: 'daily at 06:10',
+      },
+      {
+        evidenceDays: 5,
+        limitHit: '19:00',
+        targetReset: '19:10',
+        warmupTime: '14:10',
+        schedule: 'daily at 14:10',
+      },
+    ],
+  });
+});
+
+test('inferWarmupTime chains overlapping warmups one minute after the previous target reset', () => {
+  const limitHitSamples = [
+    new Date(2026, 5, 8, 11, 0),
+    new Date(2026, 5, 8, 15, 0),
+    new Date(2026, 5, 9, 10, 45),
+    new Date(2026, 5, 9, 14, 45),
+    new Date(2026, 5, 10, 11, 15),
+    new Date(2026, 5, 10, 15, 15),
+    new Date(2026, 5, 11, 11, 0),
+    new Date(2026, 5, 11, 15, 0),
+    new Date(2026, 5, 12, 11, 5),
+    new Date(2026, 5, 12, 15, 5),
+  ];
+
+  assert.deepEqual(inferWarmupTime([], {
+    limitHitSamples,
+    minLimitHitDays: 5,
+    resetPaddingMinutes: 10,
+    windowMinutes: 300,
+  }), {
+    kind: 'suggested',
+    strategy: 'limit-hit',
+    limitHitDays: 5,
+    limitHit: '11:00',
+    targetReset: '11:10',
+    warmupTime: '06:10',
+    schedule: 'daily at 06:10, daily at 11:11',
+    schedules: ['daily at 06:10', 'daily at 11:11'],
+    windows: [
+      {
+        evidenceDays: 5,
+        limitHit: '11:00',
+        targetReset: '11:10',
+        warmupTime: '06:10',
+        schedule: 'daily at 06:10',
+      },
+      {
+        evidenceDays: 5,
+        limitHit: '15:00',
+        targetReset: '16:11',
+        warmupTime: '11:11',
+        schedule: 'daily at 11:11',
+      },
+    ],
+  });
+});
+
+test('inferWarmupTime ignores duplicate same-window limit markers before inferring extra warmups', () => {
+  const limitHitSamples = [
+    new Date(2026, 5, 8, 11, 0),
+    new Date(2026, 5, 8, 11, 20),
+    new Date(2026, 5, 9, 10, 45),
+    new Date(2026, 5, 9, 11, 5),
+    new Date(2026, 5, 10, 11, 15),
+    new Date(2026, 5, 10, 11, 35),
+    new Date(2026, 5, 11, 11, 0),
+    new Date(2026, 5, 11, 11, 20),
+    new Date(2026, 5, 12, 11, 5),
+    new Date(2026, 5, 12, 11, 25),
+  ];
+
+  assert.deepEqual(inferWarmupTime([], {
+    limitHitSamples,
+    minLimitHitDays: 5,
+    resetPaddingMinutes: 10,
+    windowMinutes: 300,
+  }), {
+    kind: 'suggested',
+    strategy: 'limit-hit',
+    limitHitDays: 5,
+    limitHit: '11:00',
+    targetReset: '11:10',
+    warmupTime: '06:10',
+    schedule: 'daily at 06:10',
+    schedules: ['daily at 06:10'],
+    windows: [
+      {
+        evidenceDays: 5,
+        limitHit: '11:00',
+        targetReset: '11:10',
+        warmupTime: '06:10',
+        schedule: 'daily at 06:10',
+      },
+    ],
+  });
+});
+
+test('inferWarmupTime ignores sparse secondary hits that overlap the primary daily window', () => {
+  const limitHitSamples = [
+    new Date(2026, 4, 29, 19, 10),
+    new Date(2026, 5, 1, 0, 37),
+    new Date(2026, 5, 2, 22, 32),
+    new Date(2026, 5, 4, 1, 5),
+    new Date(2026, 5, 4, 23, 6),
+    new Date(2026, 5, 5, 0, 55),
+    new Date(2026, 5, 6, 16, 18),
+    new Date(2026, 5, 7, 4, 13),
+    new Date(2026, 5, 13, 15, 17),
+    new Date(2026, 5, 13, 22, 0),
+    new Date(2026, 5, 13, 22, 28),
+    new Date(2026, 5, 23, 13, 49),
+    new Date(2026, 5, 23, 21, 44),
+    new Date(2026, 5, 23, 22, 10),
+  ];
+
+  assert.deepEqual(inferWarmupTime([], {
+    limitHitSamples,
+    minLimitHitDays: 5,
+    resetPaddingMinutes: 10,
+    windowMinutes: 300,
+  }), {
+    kind: 'suggested',
+    strategy: 'limit-hit',
+    limitHitDays: 9,
+    limitHit: '22:32',
+    targetReset: '22:42',
+    warmupTime: '17:42',
+    schedule: 'daily at 17:42',
+    schedules: ['daily at 17:42'],
+    windows: [
+      {
+        evidenceDays: 9,
+        limitHit: '22:32',
+        targetReset: '22:42',
+        warmupTime: '17:42',
+        schedule: 'daily at 17:42',
+      },
+    ],
   });
 });
 
@@ -212,6 +400,16 @@ test('inferWarmupTime wraps early-morning limit hits to the previous evening war
     targetReset: '01:10',
     warmupTime: '20:10',
     schedule: 'daily at 20:10',
+    schedules: ['daily at 20:10'],
+    windows: [
+      {
+        evidenceDays: 5,
+        limitHit: '01:00',
+        targetReset: '01:10',
+        warmupTime: '20:10',
+        schedule: 'daily at 20:10',
+      },
+    ],
   });
 });
 
@@ -237,6 +435,16 @@ test('inferWarmupTime wraps late-night target reset into the next day', () => {
     targetReset: '00:00',
     warmupTime: '19:00',
     schedule: 'daily at 19:00',
+    schedules: ['daily at 19:00'],
+    windows: [
+      {
+        evidenceDays: 5,
+        limitHit: '23:50',
+        targetReset: '00:00',
+        warmupTime: '19:00',
+        schedule: 'daily at 19:00',
+      },
+    ],
   });
 });
 
@@ -261,6 +469,16 @@ test('inferWarmupTime treats limit-hit clusters across midnight as one cluster',
     targetReset: '00:10',
     warmupTime: '19:10',
     schedule: 'daily at 19:10',
+    schedules: ['daily at 19:10'],
+    windows: [
+      {
+        evidenceDays: 4,
+        limitHit: '00:00',
+        targetReset: '00:10',
+        warmupTime: '19:10',
+        schedule: 'daily at 19:10',
+      },
+    ],
   });
 });
 

@@ -97,6 +97,39 @@ function createDashboardFs({ claudeLimitHitAt = '2026-06-10T17:22:00.000Z' } = {
   };
 }
 
+function createSetupHistoryFs({ binaryPath, stateDir, sessionContents }) {
+  const fs = createMemoryFs({
+    [binaryPath]: '',
+    [stateDir]: '',
+    [`${stateDir}/session.jsonl`]: sessionContents,
+  });
+
+  fs.readdirSync = (filePath, options) => {
+    assert.deepEqual(options, { withFileTypes: true });
+
+    if (filePath === stateDir) {
+      return [
+        {
+          name: 'session.jsonl',
+          isDirectory: () => false,
+          isFile: () => true,
+        },
+      ];
+    }
+
+    return [];
+  };
+  fs.statSync = (filePath) => {
+    if (!fs.existsSync(filePath)) {
+      throw new Error(`missing file: ${filePath}`);
+    }
+
+    return { mtime: new Date('2026-06-13T17:22:00') };
+  };
+
+  return fs;
+}
+
 function createIo(input = '') {
   return {
     stdout: '',
@@ -331,7 +364,7 @@ test('setup dry-run for Claude prints schedule and native action without creatin
   assert.match(io.stdout, /Schedule: daily at 09:00/);
   assert.match(io.stdout, /Prompt:/);
   assert.match(io.stdout, /consume normal plan usage/);
-  assert.match(io.stdout, /claude "-p" "--model" "sonnet" "--effort" "low" "--output-format" "json" "\/schedule daily at 09:00/);
+  assert.match(io.stdout, /claude "-p" "--model" "fable" "--effort" "low" "--output-format" "json" "\/schedule daily at 09:00/);
   assert.deepEqual(
     spawn.calls.map((call) => [call.command, call.args]),
     [['/bin/claude', ['--version']]],
@@ -393,7 +426,7 @@ test('setup creates Claude routine through non-interactive print mode', async ()
         [
           '-p',
           '--model',
-          'sonnet',
+          'fable',
           '--effort',
           'low',
           '--output-format',
@@ -407,6 +440,60 @@ test('setup creates Claude routine through non-interactive print mode', async ()
       ],
     ],
   );
+});
+
+test('setup creates a Claude routine for each inferred warmup schedule', async () => {
+  const fs = createSetupHistoryFs({
+    binaryPath: '/bin/claude',
+    stateDir: '/home/alex/.claude',
+    sessionContents: [
+      '{"timestamp":"2026-06-08T11:00:00","message":"Usage limit reached. Please try again later."}',
+      '{"timestamp":"2026-06-08T15:00:00","message":"Usage limit reached. Please try again later."}',
+      '{"timestamp":"2026-06-09T10:45:00","message":"Usage limit reached. Please try again later."}',
+      '{"timestamp":"2026-06-09T14:45:00","message":"Usage limit reached. Please try again later."}',
+      '{"timestamp":"2026-06-10T11:15:00","message":"Usage limit reached. Please try again later."}',
+      '{"timestamp":"2026-06-10T15:15:00","message":"Usage limit reached. Please try again later."}',
+      '{"timestamp":"2026-06-11T11:00:00","message":"Usage limit reached. Please try again later."}',
+      '{"timestamp":"2026-06-11T15:00:00","message":"Usage limit reached. Please try again later."}',
+      '{"timestamp":"2026-06-12T11:05:00","message":"Usage limit reached. Please try again later."}',
+      '{"timestamp":"2026-06-12T15:05:00","message":"Usage limit reached. Please try again later."}',
+    ].join('\n'),
+  });
+  const io = createIo();
+  const spawnCalls = [];
+  const spawnSync = (command, args, options) => {
+    spawnCalls.push({ command, args, options });
+
+    if (args.length === 1 && args[0] === '--version') {
+      return { status: 0, stdout: '2.1.104 (Claude Code)\n' };
+    }
+
+    return {
+      status: 0,
+      stdout: JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        result:
+          'Routine created successfully. Routine ID: trig_multi. URL: https://claude.ai/code/routines/trig_multi',
+      }),
+    };
+  };
+
+  const exitCode = await runCli(['setup', '--provider', 'claude'], {
+    env: { HOME: '/home/alex', PATH: '/bin', XDG_CONFIG_HOME: '/tmp' },
+    fs,
+    io,
+    platform: 'linux',
+    spawnSync,
+  });
+
+  assert.equal(exitCode, 0);
+  const routineCalls = spawnCalls.filter((call) => call.args.includes('-p'));
+  assert.equal(routineCalls.length, 2);
+  assert.match(routineCalls[0].args.at(-1), /^\/schedule daily at 06:10 /);
+  assert.match(routineCalls[1].args.at(-1), /^\/schedule daily at 11:11 /);
+  assert.match(fs.writeCalls.at(-1).contents, /"schedules": \[\n\s+"daily at 06:10",\n\s+"daily at 11:11"\n\s+\]/);
 });
 
 test('setup does not record Claude metadata when print mode exits without creating a routine', async () => {
@@ -502,7 +589,7 @@ test('setup Claude on Windows uses detected cmd shim before writing metadata', a
   });
   assert.equal(spawnCalls[1].command, 'cmd.exe');
   assert.deepEqual(spawnCalls[1].args.slice(0, 3), ['/d', '/s', '/c']);
-  assert.match(spawnCalls[1].args[3], /^"C:\\Tools\\claude\.CMD" "-p" "--model" "sonnet" "--effort" "low" "--output-format" "json" "\/schedule daily at 09:00 /);
+  assert.match(spawnCalls[1].args[3], /^"C:\\Tools\\claude\.CMD" "-p" "--model" "fable" "--effort" "low" "--output-format" "json" "\/schedule daily at 09:00 /);
   assert.deepEqual(spawnCalls[1].options, {
     encoding: 'utf8',
     env: {
@@ -575,6 +662,8 @@ test('setup Codex creates a native automation file without agent-warmup confirma
   assert.match(fs.writeCalls[0].contents, /id = "agent-warmup"/);
   assert.match(fs.writeCalls[0].contents, /name = "Agent Warmup"/);
   assert.match(fs.writeCalls[0].contents, /status = "ACTIVE"/);
+  assert.match(fs.writeCalls[0].contents, /model = "gpt-5\.3-codex-spark"/);
+  assert.match(fs.writeCalls[0].contents, /reasoning_effort = "minimal"/);
   assert.match(
     fs.writeCalls[0].contents,
     /rrule = "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR,SA,SU;BYHOUR=9;BYMINUTE=0"/,
@@ -582,6 +671,88 @@ test('setup Codex creates a native automation file without agent-warmup confirma
   assert.match(fs.writeCalls[0].contents, /execution_environment = "local"/);
   assert.match(fs.writeCalls[0].contents, /cwds = \["\/work\/project"\]/);
   assert.match(fs.writeCalls[1].contents, /"automationName": "Agent Warmup"/);
+});
+
+test('setup Codex writes separate native automation files for inferred warmup schedules', async () => {
+  const fs = createSetupHistoryFs({
+    binaryPath: '/bin/codex',
+    stateDir: '/home/alex/.codex',
+    sessionContents: [
+      '{"timestamp":"2026-06-08T11:00:00","message":"Usage limit reached. Please try again later."}',
+      '{"timestamp":"2026-06-08T15:00:00","message":"Usage limit reached. Please try again later."}',
+      '{"timestamp":"2026-06-09T10:45:00","message":"Usage limit reached. Please try again later."}',
+      '{"timestamp":"2026-06-09T14:45:00","message":"Usage limit reached. Please try again later."}',
+      '{"timestamp":"2026-06-10T11:15:00","message":"Usage limit reached. Please try again later."}',
+      '{"timestamp":"2026-06-10T15:15:00","message":"Usage limit reached. Please try again later."}',
+      '{"timestamp":"2026-06-11T11:00:00","message":"Usage limit reached. Please try again later."}',
+      '{"timestamp":"2026-06-11T15:00:00","message":"Usage limit reached. Please try again later."}',
+      '{"timestamp":"2026-06-12T11:05:00","message":"Usage limit reached. Please try again later."}',
+      '{"timestamp":"2026-06-12T15:05:00","message":"Usage limit reached. Please try again later."}',
+    ].join('\n'),
+  });
+  const io = createIo();
+  const spawn = createSpawn({ '/bin/codex': '0.46.0' });
+
+  const exitCode = await runCli(['setup', '--provider', 'codex'], {
+    cwd: '/work/project',
+    env: { CODEX_HOME: '/state/codex', HOME: '/home/alex', PATH: '/bin', XDG_CONFIG_HOME: '/tmp' },
+    fs,
+    io,
+    platform: 'linux',
+    now: () => 1781379056290,
+    spawnSync: spawn.spawnSync,
+  });
+
+  assert.equal(exitCode, 0);
+  assert.match(io.stdout, /Created Codex Automation: agent-warmup\n/);
+  assert.match(io.stdout, /Created Codex Automation: agent-warmup-2\n/);
+  assert.match(fs.writeCalls[0].filePath, /\/state\/codex\/automations\/agent-warmup\/\.automation\.toml\./);
+  assert.match(fs.writeCalls[0].contents, /id = "agent-warmup"/);
+  assert.match(fs.writeCalls[0].contents, /rrule = "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR,SA,SU;BYHOUR=6;BYMINUTE=10"/);
+  assert.match(fs.writeCalls[1].filePath, /\/state\/codex\/automations\/agent-warmup-2\/\.automation\.toml\./);
+  assert.match(fs.writeCalls[1].contents, /id = "agent-warmup-2"/);
+  assert.match(fs.writeCalls[1].contents, /rrule = "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR,SA,SU;BYHOUR=11;BYMINUTE=11"/);
+  assert.match(fs.writeCalls[2].contents, /"schedules": \[\n\s+"daily at 06:10",\n\s+"daily at 11:11"\n\s+\]/);
+});
+
+test('setup Codex uses one native automation when inferred warmup schedules share a minute', async () => {
+  const fs = createSetupHistoryFs({
+    binaryPath: '/bin/codex',
+    stateDir: '/home/alex/.codex',
+    sessionContents: [
+      '{"timestamp":"2026-06-08T11:00:00","message":"Usage limit reached. Please try again later."}',
+      '{"timestamp":"2026-06-08T19:00:00","message":"Usage limit reached. Please try again later."}',
+      '{"timestamp":"2026-06-09T10:45:00","message":"Usage limit reached. Please try again later."}',
+      '{"timestamp":"2026-06-09T18:45:00","message":"Usage limit reached. Please try again later."}',
+      '{"timestamp":"2026-06-10T11:15:00","message":"Usage limit reached. Please try again later."}',
+      '{"timestamp":"2026-06-10T19:15:00","message":"Usage limit reached. Please try again later."}',
+      '{"timestamp":"2026-06-11T11:00:00","message":"Usage limit reached. Please try again later."}',
+      '{"timestamp":"2026-06-11T19:00:00","message":"Usage limit reached. Please try again later."}',
+      '{"timestamp":"2026-06-12T11:05:00","message":"Usage limit reached. Please try again later."}',
+      '{"timestamp":"2026-06-12T19:05:00","message":"Usage limit reached. Please try again later."}',
+    ].join('\n'),
+  });
+  const io = createIo();
+  const spawn = createSpawn({ '/bin/codex': '0.46.0' });
+
+  const exitCode = await runCli(['setup', '--provider', 'codex'], {
+    cwd: '/work/project',
+    env: { CODEX_HOME: '/state/codex', HOME: '/home/alex', PATH: '/bin', XDG_CONFIG_HOME: '/tmp' },
+    fs,
+    io,
+    platform: 'linux',
+    now: () => 1781379056290,
+    spawnSync: spawn.spawnSync,
+  });
+
+  assert.equal(exitCode, 0);
+  assert.match(io.stdout, /Created Codex Automation: agent-warmup\n/);
+  assert.doesNotMatch(io.stdout, /agent-warmup-2/);
+  assert.equal(fs.writeCalls.length, 2);
+  assert.match(fs.writeCalls[0].filePath, /\/state\/codex\/automations\/agent-warmup\/\.automation\.toml\./);
+  assert.match(fs.writeCalls[0].contents, /id = "agent-warmup"/);
+  assert.match(fs.writeCalls[0].contents, /rrule = "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR,SA,SU;BYHOUR=6,14;BYMINUTE=10"/);
+  assert.match(fs.writeCalls[1].contents, /"schedules": \[\n\s+"daily at 06:10",\n\s+"daily at 14:10"\n\s+\]/);
 });
 
 test('setup creates Codex automation before launching Claude interactive scheduler', async () => {
